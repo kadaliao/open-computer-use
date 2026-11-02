@@ -2,9 +2,9 @@
 import type { Action, Observation } from "./driver.ts";
 import { render } from "./driver.ts";
 
-export type Step = Action | { action: "done"; summary: string }
+export type Step = Action | { action: "done"; summary: string } | { action: "note"; text: string }
   | { action: "click_visual"; target: string } | { action: "read_visual"; question: string };
-export type ActStep = Exclude<Step, { action: "done" } | { action: "click_visual" } | { action: "read_visual" }>;
+export type ActStep = Exclude<Step, { action: "done" } | { action: "note" } | { action: "click_visual" } | { action: "read_visual" }>;
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 const env = process.env;
@@ -19,6 +19,10 @@ Actions:
 {"action":"open_app","name":"Notes"} {"action":"open_url","url":"https://..."}
 {"action":"click_visual","target":"the blue Send button at the bottom right"} (screenshot + vision model; use only when the element is missing from the list)
 {"action":"read_visual","question":"What does the chat window say?"} (screenshot + vision model; the answer appears in history)
+{"action":"find_text","query":"Born"} (search ALL text in the window, including what the list above cut off; results appear in history)
+{"action":"note","text":"page title is Example Domain"} (remember a fact you will need later, e.g. before switching apps)
+Calculators apply operator precedence and have no parentheses: press = to get intermediate results first.
+The element list is truncated on long pages: to read specific content, use find_text first, then read_visual.
 {"action":"done","summary":"..."}
 Rules: "type" inserts text; always pass the "ref" of the target text field/area when you can.
 Only reply done when the current screen shows the result (e.g. the typed text is visible in a field's label); never assume. Elements with role Text are read-only context.

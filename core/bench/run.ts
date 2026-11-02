@@ -7,15 +7,18 @@ import { runTask } from "../src/agent.ts";
 import { MacDriver, render } from "../src/driver.ts";
 import { tasks } from "./tasks.ts";
 
+// Selectors: task ids, or "hard" / "easy" for groups.
 const [label = process.env.OCU_JEV === "0" ? "planner-only" : "jev+planner", ...only] = process.argv.slice(2);
+const pick = (t: { id: string; hard?: boolean }) => !only.length || only.includes(t.id) ||
+  (only.includes("hard") && !!t.hard) || (only.includes("easy") && !t.hard);
 const sh = (c: string) => { try { execSync(c, { stdio: "pipe", timeout: 15000 }); return true; } catch { return false; } };
 const rows = [];
 
-for (const t of tasks.filter((t) => !only.length || only.includes(t.id))) {
+for (const t of tasks.filter(pick)) {
   if (t.setup) { sh(t.setup); await Bun.sleep(1500); }
   const t0 = performance.now();
   let r: Awaited<ReturnType<typeof runTask>>;
-  try { r = await runTask(t.goal, { maxSteps: 15, log: (s) => console.log(`  ${s}`) }); }
+  try { r = await runTask(t.goal, { maxSteps: t.hard ? 30 : 15, log: (s) => console.log(`  ${s}`) }); }
   catch (e) { r = { ok: false, summary: String(e), steps: [] }; }
   const total = Math.round(performance.now() - t0);
   await Bun.sleep(500);
@@ -23,6 +26,7 @@ for (const t of tasks.filter((t) => !only.length || only.includes(t.id))) {
   if (pass && t.verify instanceof RegExp) {
     const d = new MacDriver(); pass = t.verify.test(render(await d.observe())); d.close();
   } else if (pass && typeof t.verify === "function") pass = t.verify(r.summary);
+  else if (pass && "sh" in t.verify) pass = sh(t.verify.sh);
   const fast = r.steps.filter((s) => s.tier === "fast" || s.tier === "jev-done").length;
   rows.push({ id: t.id, pass, steps: r.steps.length, fast, total_ms: total, summary: r.summary, log: r.steps });
   console.log(`${pass ? "PASS" : "FAIL"} ${t.id}  ${r.steps.length} steps (${fast} by Jev)  ${(total / 1000).toFixed(1)}s`);

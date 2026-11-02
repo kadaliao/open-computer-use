@@ -30,6 +30,7 @@ async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; e
     if (shot.error) return { error: shot.error };
     return { ok: true, via: "vision", note: await ask(shot, step.question) };
   }
+  if (step.action === "note") return { ok: true };
   return driver.act(step as ActStep);
 }
 
@@ -60,6 +61,14 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         }
         // Same action on an unchanged screen already did nothing once: don't repeat it.
         const key = JSON.stringify(step);
+        // Ping-pong (A, B, A, B, A, ...) between two actions is a loop too.
+        const recent = history.slice(-5).map((h) => h.split(" ")[0]);
+        const pingPong = recent.length === 5 && new Set(recent).size === 2 && recent[0] === recent[2] && recent[2] === recent[4] && recent[1] === key.split(" ")[0];
+        if (pingPong) {
+          history.push(`${key} -> skipped: you are alternating between the same two actions; record what you need with note, then do the remaining work`);
+          log(`[${i}] ${tier} ${ms}ms ${key} -> skipped (ping-pong)`);
+          break;
+        }
         if (k === 0 && key === lastAct.key && screen === lastAct.screen) {
           history.push(`${key} -> skipped: it had no visible effect last time; choose a different action or approach`);
           log(`[${i}] ${tier} ${ms}ms ${key} -> skipped (no effect last time)`);
@@ -75,7 +84,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         log(`[${i}] ${tier} ${ms}ms ${line}`);
         if (res.error) break;
         // These change the UI, so later actions in the batch would act on a stale screen: re-observe.
-        if (step.action === "read_visual") break; // the planner needs to see the answer
+        if (step.action === "read_visual" || step.action === "find_text") break; // the planner needs the answer
         const changesUI = ["press", "menu", "open_app", "open_url", "click_visual"].includes(step.action) ||
           (step.action === "key" && (step.key.includes("+") || step.key === "return"));
         if (changesUI) needSettle = true;

@@ -84,6 +84,45 @@ func observe() -> [String: Any] {
   return ["app": app.localizedName ?? "", "window": win.flatMap { attr($0, kAXTitleAttribute) as? String } ?? "", "elements": els]
 }
 
+// MARK: - Text search
+
+/// Search the whole front window (no element cap) for text containing `query`.
+/// Each hit returns the text of its parent group, so "Born" also brings "23 June 1912".
+func findText(_ query: String) -> [String: Any] {
+  guard let app = currentApp ?? frontmostApp() else { return ["error": "no app"] }
+  let root = AXUIElementCreateApplication(app.processIdentifier)
+  guard let win = attr(root, kAXFocusedWindowAttribute) else { return ["error": "no window"] }
+  let q = query.lowercased()
+  var hits: [String] = []
+  var visited = 0
+  func texts(_ e: AXUIElement, _ depth: Int, _ acc: inout [String]) {
+    if depth > 6 || acc.count > 30 { return }
+    let l = label(e); if !l.isEmpty { acc.append(l) }
+    for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { texts(c, depth + 1, &acc) }
+  }
+  // Climb up to 3 ancestors until the context says more than the hit itself (e.g. table header -> row).
+  func walk(_ e: AXUIElement, _ depth: Int, _ ancestors: [AXUIElement]) {
+    visited += 1
+    if depth > 80 || visited > 20000 || hits.count >= 8 { return }
+    let l = label(e)
+    if !l.isEmpty && l.lowercased().contains(q) {
+      var joined = l
+      for a in ancestors.suffix(3).reversed() {
+        var ctx: [String] = []
+        texts(a, 0, &ctx)
+        var seen = Set<String>()
+        joined = ctx.filter { seen.insert($0).inserted }.joined(separator: " | ")
+        if joined.count >= l.count + 30 { break }
+      }
+      if !hits.contains(where: { $0.hasPrefix(String(joined.prefix(300))) }) { hits.append(String(joined.prefix(300))) }
+    }
+    let next = ancestors.count > 3 ? Array(ancestors.suffix(3)) + [e] : ancestors + [e]
+    for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { walk(c, depth + 1, next) }
+  }
+  walk(win as! AXUIElement, 0, [])
+  return ["hits": hits]
+}
+
 // MARK: - Screenshot
 
 /// Capture the observed app's front window. Returns file path, the window frame (global, top-left origin,
@@ -226,6 +265,11 @@ func act(_ r: [String: Any]) -> [String: Any] {
     guard let k = parts.last.flatMap({ keyCodes[$0] }) else { return ["error": "unknown key"] }
     focusTarget()
     postKey(k, flags: flags)
+  case "find_text":
+    let found = findText(r["query"] as? String ?? "")
+    if let err = found["error"] { return ["error": err] }
+    let hits = found["hits"] as? [String] ?? []
+    res["note"] = hits.isEmpty ? "no text found" : hits.joined(separator: "\n")
   case "click_at":
     // Global point (top-left origin). Real click; the user's cursor is put back afterwards.
     guard let x = r["x"] as? Double, let y = r["y"] as? Double else { return ["error": "click_at needs x,y"] }

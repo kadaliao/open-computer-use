@@ -15,7 +15,8 @@ export type Action =
   | { action: "open_app"; name: string }
   | { action: "open_url"; url: string }
   | { action: "menu"; path: string[] }
-  | { action: "click_at"; x: number; y: number };
+  | { action: "click_at"; x: number; y: number }
+  | { action: "find_text"; query: string };
 
 const BIN = process.env.OCU_MAC_BIN ?? fileURLToPath(new URL("../../mac/.build/release/ocu-mac", import.meta.url));
 
@@ -39,7 +40,7 @@ export class MacDriver {
   }
   observe(): Promise<Observation> { return this.call({ cmd: "observe" }); }
   screenshot(): Promise<Shot> { return this.call({ cmd: "screenshot" }); }
-  act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string }> { return this.call({ cmd: "act", ...a }); }
+  act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> { return this.call({ cmd: "act", ...a }); }
   close() { this.proc.kill(); }
 }
 
