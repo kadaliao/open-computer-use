@@ -37,3 +37,5 @@ When an element is missing from the accessibility tree (Electron, canvas, games)
 - `read_visual {question}`: ask a vision model about the window.
 
 Defaults: StepFun `step-gui` for locating (measured error of 0–2 pt on the Calculator buttons) and `step-1o-turbo-vision` for reading, using `STEPFUN_API_KEY`. Override with `OCU_VISION_BASE_URL`, `OCU_VISION_API_KEY`, `OCU_VISION_MODEL` and `OCU_VISION_READ_MODEL`. Locating expects coordinates normalized to 0–1000; set `OCU_VISION_COORDS=pixels` for models that return image pixels. Screen Recording permission is required.
+
+Also verified: `qwen3-vl-plus` via aihubmix (`OCU_VISION_BASE_URL=https://aihubmix.com/v1 OCU_VISION_MODEL=qwen3-vl-plus`), with errors of 0.4–0.5 pt and about 3.3 s per locate. In the same run, step-gui timed out once.
