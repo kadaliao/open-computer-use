@@ -14,6 +14,37 @@ async function settle(driver: MacDriver, maxMs = 2000): Promise<Observation> {
 }
 import { decide, type ActStep, type Step } from "./policy.ts";
 import { ask, locate } from "./vision.ts";
+import * as cache from "./cache.ts";
+
+const UI_CHANGERS = ["press", "menu", "open_app", "open_url", "click_visual"];
+const changesUI = (step: any) => UI_CHANGERS.includes(step.action) ||
+  (step.action === "key" && (step.key.includes("+") || step.key === "return"));
+
+/** Replay cached steps. Returns how many ran; stops at the first element that can't be found or fails. */
+async function replay(driver: MacDriver, cached: cache.CachedStep[], history: string[], record: cache.CachedStep[], steps: StepLog[], log: (s: string) => void) {
+  let n = 0, needSettle = true;
+  for (const c of cached) {
+    const t0 = performance.now();
+    const obs = needSettle ? await settle(driver) : await driver.observe();
+    const step: any = { ...c.step };
+    if (c.target) {
+      const ref = cache.resolve(obs, c.target, c.nth);
+      if (!ref) { log(`[cache] stop: "${c.target}" not on screen`); break; }
+      step.ref = ref;
+    }
+    const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
+    const ms = Math.round(performance.now() - t0);
+    steps.push({ tier: "cache", ms, step, target: res.target, error: res.error, via: res.via });
+    log(`[cache] ${ms}ms ${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}`);
+    if (res.error) break;
+    history.push(`${JSON.stringify(step)} -> ok`);
+    record.push(c);
+    // Keypad-style press runs don't need to wait for the UI between keys.
+    needSettle = changesUI(step) && !(step.action === "press" && cached[n + 1]?.step.action === "press");
+    n++;
+  }
+  return n;
+}
 
 /** Screenshot fallback actions run here; everything else goes straight to the driver. */
 async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
@@ -36,14 +67,35 @@ async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; e
 
 export type StepLog = { tier: string; ms: number; step: object; target?: string; error?: string; via?: string };
 
-export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s: string) => void } = {}) {
+export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s: string) => void; noCache?: boolean } = {}) {
   const steps: StepLog[] = [];
   const log = opts.log ?? (() => {});
   const driver = new MacDriver();
   const history: string[] = [];
   let needSettle = false;
   let lastAct = { key: "", screen: "" };  // last action and the screen it ran on
+  const record: cache.CachedStep[] = [];   // successful steps, for the cache
+  let cacheable = true;
+  let replayedAll = false;
+  let needSettleInit = false;
+  if (!opts.noCache) cache.setStartApp((await driver.observe()).app);
+  const cached = opts.noCache ? null : cache.lookup(goal);
+  const finish = (ok: boolean, summary: string) => {
+    const fixedUp = steps.filter((s) => s.tier !== "cache").length > 1;  // the planner had to act after replay
+    if (ok && cached && replayedAll && !fixedUp) cache.hit(goal);
+    else if (cached) cache.forget(goal);  // the recording didn't fit this goal; the next run records afresh
+    else if (ok && cacheable) cache.store(goal, record);
+    return { ok, summary, steps };
+  };
   try {
+    if (cached) {
+      const n = await replay(driver, cached, history, record, steps, log);
+      replayedAll = n === cached.length;
+      history.push(replayedAll ? "(the steps above were replayed from a previous successful run: check the screen and reply done if the goal is achieved)"
+        : "(a previous run's steps were replayed up to here; continue from the current screen)");
+      needSettleInit = true;
+    }
+    needSettle = needSettleInit;
     for (let i = 0; i < (opts.maxSteps ?? 25); i++) {
       const t0 = performance.now();
       const obs = needSettle ? await settle(driver) : await driver.observe();
@@ -57,7 +109,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         if (step.action === "done") {
           steps.push({ tier, ms, step });
           log(`done (${tier}, ${ms}ms): ${step.summary}`);
-          return { ok: true, summary: step.summary, steps };
+          return finish(true, step.summary);
         }
         // Same action on an unchanged screen already did nothing once: don't repeat it.
         const key = JSON.stringify(step);
@@ -77,6 +129,13 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         if (k === 0) lastAct = { key, screen };
         const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
         steps.push({ tier, ms, step, target: res.target, error: res.error, via: res.via });
+        if (!res.error) {
+          const ref = (step as any).ref;
+          const at = ref ? cache.nthOf(obs, ref) : null;
+          if (ref && !at) cacheable = false;
+          else if (step.action !== "note") record.push({ step: Object.fromEntries(Object.entries(step).filter(([k]) => k !== "ref")), ...(at ?? {}) });
+          if (["read_visual", "find_text", "note"].includes(step.action)) cacheable = false;
+        }
         const line = `${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;
         // Nudge the planner out of loops: same action 3 times in a row.
         const repeats = history.slice(-2).filter((h) => h.startsWith(JSON.stringify(step))).length;
@@ -85,16 +144,15 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         if (res.error) break;
         // These change the UI, so later actions in the batch would act on a stale screen: re-observe.
         if (step.action === "read_visual" || step.action === "find_text") break; // the planner needs the answer
-        const changesUI = ["press", "menu", "open_app", "open_url", "click_visual"].includes(step.action) ||
-          (step.action === "key" && (step.key.includes("+") || step.key === "return"));
-        if (changesUI) needSettle = true;
+        const uiChanged = changesUI(step);
+        if (uiChanged) needSettle = true;
         // Consecutive presses are fine (a Jev sequence or calculator keys); anything else re-observes.
-        if (changesUI && k < batch.length - 1 &&
+        if (uiChanged && k < batch.length - 1 &&
             !(step.action === "press" && batch[k + 1]?.action === "press")) break;
         if (batch.length > 1) await new Promise((r) => setTimeout(r, 80));
       }
       if (!needSettle) await new Promise((r) => setTimeout(r, 100));
     }
-    return { ok: false, summary: "max steps reached", steps };
+    return finish(false, "max steps reached");
   } finally { driver.close(); }
 }

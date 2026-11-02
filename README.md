@@ -10,9 +10,30 @@ A lightweight macOS computer-use agent that works from the accessibility tree fi
     cd ../core && bun install
 
 ## Use
-    bun src/cli.ts observe
-    DEEPSEEK_API_KEY=... bun src/cli.ts run "新建一条备忘录写 hello"
-    bun src/mcp.ts      # register as an MCP server (stdio)
+    bun src/cli.ts doctor                  # check permissions and which model keys work
+    bun src/cli.ts observe [app]
+    DEEPSEEK_API_KEY=... bun src/cli.ts run "新建一条备忘录写 hello" [--no-cache]
+    bun src/cli.ts cache [clear]           # list / clear the action cache
+
+## Use from another agent (MCP)
+The tool brings no model of its own. Under MCP, the calling agent (Claude Code, Codex, Cursor...) does the thinking and these tools give it a fast, exact view of the UI:
+
+    claude mcp add ocu -- bun /path/to/open-computer-use/core/src/mcp.ts
+
+- `observe {app?}`: elements of an app's window. Pass `app` (e.g. "Calculator"; localized names and bundle ids also work), because the caller's own terminal is usually frontmost.
+- `act {action, ..., then?}`: run one action, or a batch via `then`, and get the updated screen back, so no separate observe is needed.
+- `click_visual` / `read_visual`: screenshot fallback.
+- `run_task {goal}`: hand the whole goal to the built-in agent (uses its own planner key).
+
+Measured: Claude Code (Sonnet) computed 789 × 36 on Calculator in 4 turns, 19 s, using a batched `act`. Without batching the same task took 11 turns and 45 s.
+
+## Action cache
+Successful runs are saved as "goal pattern → steps", keyed by the app that was frontmost at the start, in `~/.cache/ocu/actions.json` (`OCU_CACHE_FILE`; `OCU_CACHE=0` disables it).
+- Quoted strings and numbers in the goal become parameters, so `算 37 乘以 12` replays for `算 906 乘以 7`. Keypad presses that spell a parameter are re-spelled with the new value.
+- Elements are stored by role and label, and resolved to fresh refs on replay.
+- After replay the planner checks the screen once. If it has to fix anything, the entry is dropped and the next run records afresh.
+- Runs that read content (find_text / read_visual / note) are not cached, because their results change.
+- The benchmark disables the cache unless `OCU_CACHE=1`.
 
 ## Config (environment variables)
 - `OCU_BASE_URL` / `OCU_MODEL` / `OCU_API_KEY`: any OpenAI-compatible planner. Defaults to DeepSeek `deepseek-chat`.

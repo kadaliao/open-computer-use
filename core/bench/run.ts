@@ -6,6 +6,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { runTask } from "../src/agent.ts";
 import { MacDriver, render } from "../src/driver.ts";
 import { tasks } from "./tasks.ts";
+// Measure the models, not the cache (OCU_CACHE=1 to benchmark replays).
+process.env.OCU_CACHE ??= "0";
 
 // Selectors: task ids, or "hard" / "easy" for groups.
 const [label = process.env.OCU_JEV === "0" ? "planner-only" : "jev+planner", ...only] = process.argv.slice(2);

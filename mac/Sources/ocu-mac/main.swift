@@ -63,9 +63,18 @@ func frontmostApp() -> NSRunningApplication? {
   return NSWorkspace.shared.frontmostApplication
 }
 
-func observe() -> [String: Any] {
+func observe(_ appName: String? = nil) -> [String: Any] {
   refs = [:]; refInfo = [:]
-  guard let app = frontmostApp() else { return ["error": "no frontmost app"] }
+  var target: NSRunningApplication? = nil
+  if let n = appName?.lowercased(), !n.isEmpty {
+    // Match the localized name ("计算器"), the bundle file name ("Calculator") or the bundle id.
+    let names = { (a: NSRunningApplication) -> [String] in
+      [a.localizedName, a.bundleURL?.deletingPathExtension().lastPathComponent, a.bundleIdentifier].compactMap { $0?.lowercased() } }
+    let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+    target = apps.first { names($0).contains(n) } ?? apps.first { names($0).contains { $0.contains(n) } }
+    if target == nil { return ["error": "app not running: \(appName!)"] }
+  }
+  guard let app = target ?? frontmostApp() else { return ["error": "no frontmost app"] }
   currentApp = app
   let root = AXUIElementCreateApplication(app.processIdentifier)
   var els: [[String: Any]] = []
@@ -439,7 +448,7 @@ Thread.detachNewThread {
   while let line = readLine() {
     guard let req = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
     let cmd = req["cmd"] as? String
-    var res: [String: Any] = cmd == "observe" ? observe() : cmd == "screenshot" ? screenshot() : act(req)
+    var res: [String: Any] = cmd == "observe" ? observe(req["app"] as? String) : cmd == "screenshot" ? screenshot() : act(req)
     res["id"] = req["id"] ?? NSNull()
     let data = try! JSONSerialization.data(withJSONObject: res)
     print(String(data: data, encoding: .utf8)!)

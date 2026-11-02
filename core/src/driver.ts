@@ -38,7 +38,7 @@ export class MacDriver {
       this.proc.stdin!.write(JSON.stringify({ id, ...req }) + "\n");
     });
   }
-  observe(): Promise<Observation> { return this.call({ cmd: "observe" }); }
+  observe(app?: string): Promise<Observation> { return this.call({ cmd: "observe", ...(app ? { app } : {}) }); }
   screenshot(): Promise<Shot> { return this.call({ cmd: "screenshot" }); }
   act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> { return this.call({ cmd: "act", ...a }); }
   close() { this.proc.kill(); }
@@ -46,6 +46,7 @@ export class MacDriver {
 
 // Compact text form of the UI: one line per interactive element, cheap for text-only models.
 export const render = (o: Observation) => {
+  if (o.error || !o.elements) return `error: ${o.error ?? JSON.stringify(o)}`;
   const labeled = o.elements.filter((e) => e.label).length;
   const sparse = labeled < 5 ? "\n(accessibility info is sparse here: use click_visual / read_visual)" : "";
   return `app: ${o.app} | window: ${o.window}${sparse}\n` + o.elements.map((e) => `${e.ref} ${e.role} "${e.label}"`).join("\n");
