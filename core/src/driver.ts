@@ -1,0 +1,44 @@
+// Talks to the ocu-mac helper over line-delimited JSON.
+import { spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+
+export type Element = { ref: string; role: string; label: string };
+export type Observation = { app: string; window: string; elements: Element[]; error?: string };
+export type Action =
+  | { action: "press"; ref: string }
+  | { action: "set_value"; ref: string; text: string }
+  | { action: "type"; text: string }
+  | { action: "key"; key: string }
+  | { action: "open_app"; name: string }
+  | { action: "open_url"; url: string }
+  | { action: "menu"; path: string[] };
+
+const BIN = process.env.OCU_MAC_BIN ?? fileURLToPath(new URL("../../mac/.build/release/ocu-mac", import.meta.url));
+
+export class MacDriver {
+  private proc = spawn(BIN, [], { stdio: ["pipe", "pipe", "inherit"] });
+  private pending = new Map<number, (v: any) => void>();
+  private nextId = 1;
+  constructor() {
+    createInterface({ input: this.proc.stdout! }).on("line", (l) => {
+      const msg = JSON.parse(l);
+      this.pending.get(msg.id)?.(msg);
+      this.pending.delete(msg.id);
+    });
+  }
+  private call(req: object): Promise<any> {
+    const id = this.nextId++;
+    return new Promise((res) => {
+      this.pending.set(id, res);
+      this.proc.stdin!.write(JSON.stringify({ id, ...req }) + "\n");
+    });
+  }
+  observe(): Promise<Observation> { return this.call({ cmd: "observe" }); }
+  act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string }> { return this.call({ cmd: "act", ...a }); }
+  close() { this.proc.kill(); }
+}
+
+// Compact text form of the UI: one line per interactive element, cheap for text-only models.
+export const render = (o: Observation) =>
+  `app: ${o.app} | window: ${o.window}\n` + o.elements.map((e) => `${e.ref} ${e.role} "${e.label}"`).join("\n");
