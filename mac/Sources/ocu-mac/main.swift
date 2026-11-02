@@ -50,7 +50,15 @@ func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
       out.append(item)
     }
   }
-  for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { collect(c, depth: depth + 1, out: &out) }
+  // Long lists (hundreds of notes, files, messages) would use up the element budget and hide the rest of
+  // the window, so only their visible rows (or the first 30) are listed.
+  var kids = (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? []
+  if ["AXTable", "AXOutline", "AXList"].contains(role) {
+    if let vis = attr(e, kAXVisibleRowsAttribute) as? [AXUIElement], !vis.isEmpty { kids = vis }
+    else if let vis = attr(e, kAXVisibleChildrenAttribute) as? [AXUIElement], !vis.isEmpty { kids = vis }
+    kids = Array(kids.prefix(30))
+  }
+  for c in kids { collect(c, depth: depth + 1, out: &out) }
 }
 
 // NSWorkspace.frontmostApplication goes stale without a run loop; the window list is reliable.

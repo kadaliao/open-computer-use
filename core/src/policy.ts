@@ -23,6 +23,7 @@ Actions:
 {"action":"note","text":"page title is Example Domain"} (remember a fact you will need later, e.g. before switching apps)
 Calculators apply operator precedence and have no parentheses: press = to get intermediate results first.
 The element list is truncated on long pages: to read specific content, use find_text first, then read_visual.
+In Safari, if find_text misses text a page should have (e.g. a Wikipedia infobox), Reader mode is probably on and hides it: {"action":"menu","path":["显示","隐藏阅读器"]} (English: View > Hide Reader), then search again.
 {"action":"done","summary":"..."}
 Rules: "type" inserts text; always pass the "ref" of the target text field/area when you can.
 Only reply done when the current screen shows the result (e.g. the typed text is visible in a field's label); never assume. Elements with role Text are read-only context.
