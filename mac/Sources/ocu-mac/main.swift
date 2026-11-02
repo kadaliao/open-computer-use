@@ -217,6 +217,16 @@ func pressMenu(_ path: [String]) -> String? {
   return AXUIElementPerformAction(node, kAXPressAction as CFString) == .success ? nil : "press failed"
 }
 
+func inWebArea(_ e: AXUIElement) -> Bool {
+  var node: AXUIElement? = e
+  for _ in 0..<40 {
+    guard let n = node else { return false }
+    if (attr(n, kAXRoleAttribute) as? String) == "AXWebArea" { return true }
+    node = attr(n, kAXParentAttribute).map { $0 as! AXUIElement }
+  }
+  return false
+}
+
 func clickAt(_ p: CGPoint) {
   CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
   usleep(20_000)
@@ -240,7 +250,19 @@ func act(_ r: [String: Any]) -> [String: Any] {
     Overlay.shared.ripple()
     // Plain text reports success for AXPress but does nothing, so click it for real.
     let isText = (attr(el, kAXRoleAttribute) as? String) == "AXStaticText"
-    if isText || AXUIElementPerformAction(el, kAXPressAction as CFString) != .success {
+    // Web content (Electron apps, browsers) often answers AXPress with "success" and ignores it:
+    // pages listen for mouse events. Click those for real.
+    if inWebArea(el), let f = frame(el), f.width > 0 {
+      // A click that lands while the app is still coming forward gets lost, so give activation time.
+      let wasFront = frontmostApp()?.processIdentifier == currentApp?.processIdentifier
+      focusTarget()
+      if !wasFront { Thread.sleep(forTimeInterval: 0.35) }
+      Thread.sleep(forTimeInterval: 0.1)
+      let saved = CGEvent(source: nil)?.location
+      clickAt(CGPoint(x: f.midX, y: f.midY))
+      if let saved { usleep(30_000); CGWarpMouseCursorPosition(saved) }
+      res["via"] = "click"
+    } else if isText || AXUIElementPerformAction(el, kAXPressAction as CFString) != .success {
       // Some elements (cells, rows, text) have no press action; fall back to a real click at their center.
       guard let f = frame(el) else { return ["error": "press failed"] }
       clickAt(CGPoint(x: f.midX, y: f.midY))

@@ -20,7 +20,14 @@ import { runTask } from "./agent.ts";
 const driver = new MacDriver();
 const server = new McpServer({ name: "open-computer-use", version: "0.3.0" });
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
-let lastApp: string | undefined;  // the caller's own terminal is usually frontmost, so stick to the app it chose
+let lastApp: string | undefined;
+let lastScreen = "";  // what the caller last saw, to tell it when an action changed nothing
+const show = (o: Observation) => {
+  const r = render(o);
+  const same = r === lastScreen;
+  lastScreen = r;
+  return same ? `(the screen did not change after this action: it probably had no effect. Try another element, a menu, or click_visual)\n${r}` : r;
+};  // the caller's own terminal is usually frontmost, so stick to the app it chose
 
 /** Re-read until the UI stops changing (window opened, page loaded). */
 async function settled(app?: string): Promise<Observation> {
@@ -39,7 +46,7 @@ server.tool("observe",
   "Pass `app` (name or bundle id) to target an app without bringing it forward; otherwise the frontmost app (often your own terminal) is read. " +
   "The app is remembered for later calls.",
   { app: z.string().optional() },
-  async ({ app }) => { if (app) lastApp = app; return text(render(await driver.observe(lastApp))); });
+  async ({ app }) => { if (app) lastApp = app; const o = await driver.observe(lastApp); lastScreen = render(o); return text(lastScreen); });
 
 const one = {
   action: z.enum(["press", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at"]),
@@ -50,7 +57,9 @@ server.tool("act",
   "Perform one action, then return the updated screen (same format as observe). Refs come from the latest observe/act. " +
   "press{ref} | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key} e.g. \"cmd+shift+g\", \"return\" | " +
   "open_app{name} | open_url{url} | menu{path:[\"File\",\"New Folder\"]} | find_text{text} search the whole window, incl. off-screen text | " +
-  "click_at{x,y} global screen point. Keyboard actions bring the observed app forward first.",
+  "click_at{x,y} global screen point. Keyboard actions bring the observed app forward first. " +
+  "Work from refs: the reply already shows the new screen (menus and popups included), so don't take your own screenshots or guess coordinates; " +
+  "use click_visual only when the element really isn't listed.",
   { ...one, then: z.array(z.object(one)).optional().describe("more actions to run right after, in order, using refs from the same screen (e.g. a run of keypad presses); stops at the first error") },
   async ({ then, ...a }) => {
     if (then?.length) {
@@ -60,7 +69,7 @@ server.tool("act",
         if (r.error) break;
         await new Promise((res) => setTimeout(res, 60));
       }
-      return text(`results: ${JSON.stringify(results)}\n\n${render(await settled(lastApp))}`);
+      return text(`results: ${JSON.stringify(results)}\n\n${show(await settled(lastApp))}`);
     }
     if (a.action === "open_app" && a.name) lastApp = a.name;
     if (a.action === "open_url") lastApp = undefined;  // the browser comes forward
@@ -68,7 +77,7 @@ server.tool("act",
     const res = await driver.act(req);
     if (a.action === "find_text") return text(JSON.stringify(res));
     const obs = await settled(lastApp);
-    return text(`result: ${JSON.stringify(res)}\n\n${render(obs)}`);
+    return text(`result: ${JSON.stringify(res)}\n\n${show(obs)}`);
   });
 
 server.tool("click_visual", "Screenshot fallback for apps with little accessibility info (canvas, games, some Electron apps): a vision model finds the described element and clicks it.",
@@ -80,7 +89,7 @@ server.tool("click_visual", "Screenshot fallback for apps with little accessibil
     const p = await locate(shot, target);
     if (!p) return text(`not found: ${target}`);
     const res = await driver.act({ action: "click_at", x: p.x, y: p.y });
-    return text(`result: ${JSON.stringify(res)}\n\n${render(await settled(lastApp))}`);
+    return text(`result: ${JSON.stringify(res)}\n\n${show(await settled(lastApp))}`);
   });
 
 server.tool("read_visual", "Screenshot fallback: ask a vision model a question about the observed app's window.",
