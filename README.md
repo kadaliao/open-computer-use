@@ -15,6 +15,23 @@ A lightweight macOS computer-use agent that works from the accessibility tree fi
     DEEPSEEK_API_KEY=... bun src/cli.ts run "新建一条备忘录写 hello" [--no-cache]
     bun src/cli.ts cache [clear]           # list / clear the action cache
 
+## Install a release
+    ./scripts/release.sh v0.4.0               # -> dist/ocu-v0.4.0-macos-arm64.tar.gz (single binary + helper, no bun needed)
+    tar xzf ocu-*.tar.gz && sh ocu-*/install.sh   # -> ~/.local/share/ocu, ~/.local/bin/ocu
+
+### DeepSeek Harness
+Add this to `~/.dsh/cordis.patch.yml` under `insert:`, then restart the app:
+
+    - id: ocu-mcp
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: ocu
+        transport: stdio
+        command: /Users/<you>/.local/share/ocu/ocu
+        args: [mcp]
+
+Grant **DeepSeek Harness** Accessibility permission (System Settings > Privacy & Security > Accessibility). macOS checks the app that launches the helper, not the terminal. GUI apps don't inherit your shell variables, so `click_visual`/`read_visual`/`run_task`, which need model keys, only work if the keys are passed in the server's `env` config. `observe`/`act` need no keys.
+
 ## Use from another agent (MCP)
 The tool brings no model of its own. Under MCP, the calling agent (Claude Code, Codex, Cursor...) does the thinking and these tools give it a fast, exact view of the UI:
 

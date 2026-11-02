@@ -1,7 +1,7 @@
 // `ocu doctor`: check permissions and which model endpoints actually answer, then suggest a working setup.
 // Key values are never printed, only the variable names.
 import { existsSync } from "node:fs";
-import { MacDriver } from "./driver.ts";
+import { BIN, MacDriver } from "./driver.ts";
 
 const env = process.env;
 const ok = (s: string) => console.log(`  ✓ ${s}`);
@@ -23,7 +23,7 @@ async function chat(base: string, key: string | undefined, model: string, maxTok
 
 export async function doctor() {
   console.log("permissions");
-  const bin = env.OCU_MAC_BIN ?? new URL("../../mac/.build/release/ocu-mac", import.meta.url).pathname;
+  const bin = BIN;
   if (!existsSync(bin)) { bad(`helper not built: ${bin} (cd mac && swift build -c release)`); return; }
   const d = new MacDriver();
   const obs = await d.observe();

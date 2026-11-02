@@ -10,6 +10,8 @@ if (cmd === "run" && rest.length) {
   process.exit(r.ok ? 0 : 1);
 } else if (cmd === "observe") {
   const d = new MacDriver(); console.log(render(await d.observe(rest[0]))); d.close();
+} else if (cmd === "mcp") {
+  await import("./mcp.ts");
 } else if (cmd === "doctor") {
   await (await import("./doctor.ts")).doctor();
 } else if (cmd === "cache") {
@@ -22,5 +24,5 @@ if (cmd === "run" && rest.length) {
     console.log(`(${Object.keys(db).length} entries in ${file})`);
   }
 } else {
-  console.log('usage: ocu run "<goal>" [--no-cache] | ocu observe [app] | ocu doctor | ocu cache [clear]');
+  console.log('usage: ocu run "<goal>" [--no-cache] | ocu observe [app] | ocu mcp | ocu doctor | ocu cache [clear]');
 }

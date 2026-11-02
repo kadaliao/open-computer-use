@@ -88,3 +88,7 @@ server.tool("run_task",
   });
 
 await server.connect(new StdioServerTransport());
+// The host closed our stdin (it quit or restarted the server): exit and take the helper with us.
+const bye = () => { driver.close(); process.exit(0); };
+process.stdin.on("end", bye);
+process.stdin.on("close", bye);

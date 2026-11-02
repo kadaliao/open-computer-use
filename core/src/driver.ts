@@ -18,7 +18,12 @@ export type Action =
   | { action: "click_at"; x: number; y: number }
   | { action: "find_text"; query: string };
 
-const BIN = process.env.OCU_MAC_BIN ?? fileURLToPath(new URL("../../mac/.build/release/ocu-mac", import.meta.url));
+import { existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+// Release build: ocu-mac sits next to the compiled `ocu` binary. Dev: the Swift build output.
+const besideExe = join(dirname(process.execPath), "ocu-mac");
+export const BIN = process.env.OCU_MAC_BIN ??
+  (existsSync(besideExe) ? besideExe : fileURLToPath(new URL("../../mac/.build/release/ocu-mac", import.meta.url)));
 
 export class MacDriver {
   private proc = spawn(BIN, [], { stdio: ["pipe", "pipe", "inherit"] });
