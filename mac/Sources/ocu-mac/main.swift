@@ -34,8 +34,9 @@ func label(_ e: AXUIElement) -> String {
     .compactMap { attr(e, $0) as? String }.first { !$0.isEmpty } ?? ""
 }
 
+var collectDeadline = Date.distantFuture  // observe gives up after a few seconds on huge or slow apps
 func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
-  if depth > 40 || out.count > 400 { return }
+  if depth > 40 || out.count > 400 || Date() > collectDeadline { return }
   let role = attr(e, kAXRoleAttribute) as? String ?? ""
   if interactiveRoles.contains(role) {
     let l = String(label(e).prefix(80))
@@ -73,6 +74,7 @@ func frontmostApp() -> NSRunningApplication? {
 
 func observe(_ appName: String? = nil) -> [String: Any] {
   refs = [:]; refInfo = [:]
+  if !AXIsProcessTrusted() { return ["error": noPermission] }
   var target: NSRunningApplication? = nil
   if let n = appName?.lowercased(), !n.isEmpty {
     // Match the localized name ("计算器"), the bundle file name ("Calculator") or the bundle id.
@@ -88,6 +90,7 @@ func observe(_ appName: String? = nil) -> [String: Any] {
   var els: [[String: Any]] = []
   let win = attr(root, kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
   currentWindow = win
+  collectDeadline = Date().addingTimeInterval(3)
   collect(win ?? root, depth: 0, out: &els)
   // Menu bar items are reachable even when the window has little to offer.
   if let bar = attr(root, kAXMenuBarAttribute) {
@@ -223,6 +226,8 @@ func clickAt(_ p: CGPoint) {
 }
 
 func act(_ r: [String: Any]) -> [String: Any] {
+  let action = r["action"] as? String ?? ""
+  if !AXIsProcessTrusted() && !["open_app", "open_url"].contains(action) { return ["error": noPermission] }
   let ref = r["ref"] as? String
   let el = ref.flatMap { refs[$0] }
   var res: [String: Any] = [:]
@@ -444,9 +449,15 @@ final class Overlay {
 
 // MARK: - Main
 
-if !AXIsProcessTrusted() {
-  FileHandle.standardError.write("ocu-mac: grant Accessibility permission to the terminal running this\n".data(using: .utf8)!)
+// Without permission macOS returns empty trees, not errors. Ask once, which adds the launching app
+// (terminal, DeepSeek Harness, ...) to System Settings > Accessibility, so the user only has to tick it.
+if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary) {
+  FileHandle.standardError.write("ocu-mac: Accessibility permission missing for the app that launched ocu\n".data(using: .utf8)!)
 }
+let noPermission = "Accessibility permission is missing for the app that launched ocu (e.g. DeepSeek Harness or your terminal). Tick it in System Settings > Privacy & Security > Accessibility, then restart that app. Until then nothing can be read or pressed."
+
+// A hung app would otherwise block each AX call for 6 s.
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1.0)
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // no Dock icon, never steals focus
@@ -456,7 +467,7 @@ Thread.detachNewThread {
   while let line = readLine() {
     guard let req = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
     let cmd = req["cmd"] as? String
-    var res: [String: Any] = cmd == "observe" ? observe(req["app"] as? String) : cmd == "screenshot" ? screenshot() : act(req)
+    var res: [String: Any] = cmd == "trust" ? ["trusted": AXIsProcessTrusted()] : cmd == "observe" ? observe(req["app"] as? String) : cmd == "screenshot" ? screenshot() : act(req)
     res["id"] = req["id"] ?? NSNull()
     let data = try! JSONSerialization.data(withJSONObject: res)
     print(String(data: data, encoding: .utf8)!)

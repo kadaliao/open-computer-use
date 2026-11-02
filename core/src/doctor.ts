@@ -25,13 +25,20 @@ export async function doctor() {
   console.log("permissions");
   const bin = BIN;
   if (!existsSync(bin)) { bad(`helper not built: ${bin} (cd mac && swift build -c release)`); return; }
+  console.log(`  helper: ${bin}`);
   const d = new MacDriver();
-  const obs = await d.observe();
-  if (obs.error || obs.elements.length === 0) bad(`Accessibility: cannot read ${obs.app || "the front app"} - grant it to your terminal in System Settings > Privacy & Security > Accessibility`);
-  else ok(`Accessibility (${obs.app}: ${obs.elements.length} elements)`);
-  const shot = await d.screenshot();
-  if (shot.error) bad(`Screen Recording: ${shot.error} - needed only for click_visual / read_visual`);
-  else ok("Screen Recording");
+  try {
+    if (!(await d.trusted())) {
+      bad("Accessibility: not granted. Add the app running ocu (your terminal, or DeepSeek Harness / Claude etc. when used over MCP) in System Settings > Privacy & Security > Accessibility, then restart that app");
+    } else {
+      const obs = await d.observe();
+      if (obs.error) bad(`Accessibility granted, but reading ${obs.app || "the front app"} failed: ${obs.error}`);
+      else ok(`Accessibility (${obs.app}: ${obs.elements.length} elements)`);
+    }
+    const shot = await d.screenshot();
+    if (shot.error) bad(`Screen Recording: ${shot.error} - needed only for click_visual / read_visual`);
+    else ok("Screen Recording");
+  } catch (e) { bad(String((e as Error).message)); }
   d.close();
 
   console.log("planner (required)");

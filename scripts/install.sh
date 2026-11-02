@@ -4,8 +4,13 @@ set -e
 SRC=$(cd "$(dirname "$0")" && pwd)
 DEST=${OCU_HOME:-$HOME/.local/share/ocu}
 mkdir -p "$DEST" "$HOME/.local/bin"
-cp "$SRC/ocu" "$SRC/ocu-mac" "$DEST/"
-xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+# Remove first: overwriting a signed binary in place makes macOS kill it on launch (exit 137).
+for f in ocu ocu-mac; do
+  rm -f "$DEST/$f"
+  cp "$SRC/$f" "$DEST/$f"
+  xattr -d com.apple.quarantine "$DEST/$f" 2>/dev/null || true
+  codesign --force -s - "$DEST/$f" 2>/dev/null || true
+done
 ln -sf "$DEST/ocu" "$HOME/.local/bin/ocu"
 echo "installed: $DEST (ocu -> ~/.local/bin/ocu)"
 echo

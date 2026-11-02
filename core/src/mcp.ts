@@ -1,5 +1,16 @@
 // MCP server so any harness (Claude Code, Codex, DeepSeek-based agents) can drive macOS apps.
 // The calling agent supplies the intelligence; these tools give it a cheap, exact view of the UI.
+import { spawnSync } from "node:child_process";
+// GUI hosts (DeepSeek Harness, Claude desktop...) don't inherit keys set up by an interactive shell.
+// Borrow model keys from the user's shell once, in memory only.
+if (!process.env.DEEPSEEK_API_KEY && !process.env.OCU_API_KEY && process.env.OCU_SHELL_ENV !== "0") {
+  const sh = process.env.SHELL || "/bin/zsh";
+  const r = spawnSync(sh, ["-i", "-l", "-c", "env"], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+  for (const line of (r.stdout ?? "").split("\n")) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (m && /(_API_KEY|_BASE_URL)$|^OCU_/.test(m[1]) && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+}
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
