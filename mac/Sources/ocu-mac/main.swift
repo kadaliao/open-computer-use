@@ -45,7 +45,9 @@ func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
       refs[ref] = e
       let r = String(role.dropFirst(2)).replacingOccurrences(of: "StaticText", with: "Text")
       refInfo[ref] = "\(r) \(l)"
-      out.append(["ref": ref, "role": r, "label": l])
+      var item: [String: Any] = ["ref": ref, "role": r, "label": l]
+      if let f = frame(e) { item["f"] = [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)] }
+      out.append(item)
     }
   }
   for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { collect(c, depth: depth + 1, out: &out) }
@@ -80,6 +82,26 @@ func observe() -> [String: Any] {
   }
   if let w = win, let f = frame(w) { Overlay.shared.glowWindow(f) }
   return ["app": app.localizedName ?? "", "window": win.flatMap { attr($0, kAXTitleAttribute) as? String } ?? "", "elements": els]
+}
+
+// MARK: - Screenshot
+
+/// Capture the observed app's front window. Returns file path, the window frame (global, top-left origin,
+/// in points) and the image size in pixels, so callers can map image coordinates back to the screen.
+func screenshot() -> [String: Any] {
+  guard let app = currentApp ?? frontmostApp() else { return ["error": "no app"] }
+  let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+  guard let w = list.first(where: { ($0[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 0 }),
+        let wid = w[kCGWindowNumber as String] as? Int,
+        let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return ["error": "no window"] }
+  let path = NSTemporaryDirectory() + "ocu-shot-\(getpid()).png"
+  let p = Process()
+  p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+  p.arguments = ["-x", "-o", "-l", "\(wid)", path]
+  do { try p.run(); p.waitUntilExit() } catch { return ["error": "\(error)"] }
+  guard let img = NSImage(contentsOfFile: path), let rep = img.representations.first else { return ["error": "capture failed (Screen Recording permission?)"] }
+  return ["path": path, "x": b["X"] ?? 0, "y": b["Y"] ?? 0, "w": b["Width"] ?? 0, "h": b["Height"] ?? 0,
+          "px_w": rep.pixelsWide, "px_h": rep.pixelsHigh]
 }
 
 // MARK: - Input
@@ -137,6 +159,8 @@ func pressMenu(_ path: [String]) -> String? {
 }
 
 func clickAt(_ p: CGPoint) {
+  CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+  usleep(20_000)
   for t in [CGEventType.leftMouseDown, .leftMouseUp] {
     CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
   }
@@ -202,6 +226,17 @@ func act(_ r: [String: Any]) -> [String: Any] {
     guard let k = parts.last.flatMap({ keyCodes[$0] }) else { return ["error": "unknown key"] }
     focusTarget()
     postKey(k, flags: flags)
+  case "click_at":
+    // Global point (top-left origin). Real click; the user's cursor is put back afterwards.
+    guard let x = r["x"] as? Double, let y = r["y"] as? Double else { return ["error": "click_at needs x,y"] }
+    let pt = CGPoint(x: x, y: y)
+    Overlay.shared.moveCursor(to: CGRect(x: x - 12, y: y - 12, width: 24, height: 24))
+    Overlay.shared.ripple()
+    focusTarget()
+    let saved = CGEvent(source: nil)?.location
+    clickAt(pt)
+    if let saved { usleep(30_000); CGWarpMouseCursorPosition(saved) }
+    res["target"] = "Point \(Int(x)),\(Int(y))"
   case "menu":
     guard let path = r["path"] as? [String] else { return ["error": "menu needs path"] }
     focusTarget()
@@ -359,7 +394,8 @@ Overlay.shared.setup()
 Thread.detachNewThread {
   while let line = readLine() {
     guard let req = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
-    var res: [String: Any] = req["cmd"] as? String == "observe" ? observe() : act(req)
+    let cmd = req["cmd"] as? String
+    var res: [String: Any] = cmd == "observe" ? observe() : cmd == "screenshot" ? screenshot() : act(req)
     res["id"] = req["id"] ?? NSNull()
     let data = try! JSONSerialization.data(withJSONObject: res)
     print(String(data: data, encoding: .utf8)!)

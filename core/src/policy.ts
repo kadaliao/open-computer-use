@@ -2,7 +2,9 @@
 import type { Action, Observation } from "./driver.ts";
 import { render } from "./driver.ts";
 
-export type Step = Action | { action: "done"; summary: string };
+export type Step = Action | { action: "done"; summary: string }
+  | { action: "click_visual"; target: string } | { action: "read_visual"; question: string };
+export type ActStep = Exclude<Step, { action: "done" } | { action: "click_visual" } | { action: "read_visual" }>;
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 const env = process.env;
@@ -15,6 +17,8 @@ Actions:
 {"action":"key","key":"return"} (keys: return tab escape space delete up down left right, combos like "cmd+n", "cmd+shift+left")
 {"action":"menu","path":["前往","下载"]} (click a menu-bar menu item by its titles; MenuBarItem elements list the top menus)
 {"action":"open_app","name":"Notes"} {"action":"open_url","url":"https://..."}
+{"action":"click_visual","target":"the blue Send button at the bottom right"} (screenshot + vision model; use only when the element is missing from the list)
+{"action":"read_visual","question":"What does the chat window say?"} (screenshot + vision model; the answer appears in history)
 {"action":"done","summary":"..."}
 Rules: "type" inserts text; always pass the "ref" of the target text field/area when you can.
 Only reply done when the current screen shows the result (e.g. the typed text is visible in a field's label); never assume. Elements with role Text are read-only context.

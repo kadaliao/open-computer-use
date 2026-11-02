@@ -12,7 +12,26 @@ async function settle(driver: MacDriver, maxMs = 2000): Promise<Observation> {
   }
   return prev;
 }
-import { decide } from "./policy.ts";
+import { decide, type ActStep, type Step } from "./policy.ts";
+import { ask, locate } from "./vision.ts";
+
+/** Screenshot fallback actions run here; everything else goes straight to the driver. */
+async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
+  if (step.action === "click_visual") {
+    const shot = await driver.screenshot();
+    if (shot.error) return { error: shot.error };
+    const p = await locate(shot, step.target).catch((e) => { throw new Error(String(e)); });
+    if (!p) return { error: `vision model could not find "${step.target}"` };
+    const res = await driver.act({ action: "click_at", x: p.x, y: p.y });
+    return { ...res, target: `Visual "${step.target}" @${Math.round(p.x)},${Math.round(p.y)}`, via: "vision" };
+  }
+  if (step.action === "read_visual") {
+    const shot = await driver.screenshot();
+    if (shot.error) return { error: shot.error };
+    return { ok: true, via: "vision", note: await ask(shot, step.question) };
+  }
+  return driver.act(step as ActStep);
+}
 
 export type StepLog = { tier: string; ms: number; step: object; target?: string; error?: string; via?: string };
 
@@ -47,16 +66,17 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
           break;
         }
         if (k === 0) lastAct = { key, screen };
-        const res = await driver.act(step);
+        const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
         steps.push({ tier, ms, step, target: res.target, error: res.error, via: res.via });
-        const line = `${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}`;
+        const line = `${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;
         // Nudge the planner out of loops: same action 3 times in a row.
         const repeats = history.slice(-2).filter((h) => h.startsWith(JSON.stringify(step))).length;
         history.push(repeats === 2 ? `${line} (repeated 3 times with no progress - try a different approach)` : line);
         log(`[${i}] ${tier} ${ms}ms ${line}`);
         if (res.error) break;
         // These change the UI, so later actions in the batch would act on a stale screen: re-observe.
-        const changesUI = ["press", "menu", "open_app", "open_url"].includes(step.action) ||
+        if (step.action === "read_visual") break; // the planner needs to see the answer
+        const changesUI = ["press", "menu", "open_app", "open_url", "click_visual"].includes(step.action) ||
           (step.action === "key" && (step.key.includes("+") || step.key === "return"));
         if (changesUI) needSettle = true;
         // Consecutive presses are fine (a Jev sequence or calculator keys); anything else re-observes.
