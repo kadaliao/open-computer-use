@@ -114,7 +114,11 @@ func observe(_ appName: String? = nil) -> [String: Any] {
   }
   if let w = win, let f = frame(w) { Overlay.shared.glowWindow(f) }
   let title = win.map { attr($0, kAXTitleAttribute) as? String ?? "" } ?? "(no open window: open one with key cmd+n or a menu)"
-  return ["app": app.localizedName ?? "", "window": title, "elements": els]
+  // Other windows of the app, so the caller knows what's behind the focused one (e.g. a pile of info windows).
+  let others = ((attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? [])
+    .filter { w in isWindow(w) && !(win.map { CFEqual($0, w) } ?? false) }
+    .map { attr($0, kAXTitleAttribute) as? String ?? "" }
+  return ["app": app.localizedName ?? "", "window": title, "elements": els, "others": others]
 }
 
 // MARK: - Text search

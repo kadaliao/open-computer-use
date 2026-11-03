@@ -35,6 +35,7 @@ Picking an action:
 - Long pages: find_text{text} searches the whole window, including off-screen content.
 - Open things with open_app / open_url instead of clicking around Finder or the Dock.
 When stuck:
+- Watch "other windows of this app": an action may open several windows at once. Close extras in one batch or with a "close all" shortcut instead of one per step.
 - "did not change" means the action had no effect: pick a different element, try the menu or a shortcut. Don't repeat the same action.
 - Element missing or the list is sparse (canvas, games, some web views): ${hasVision ? "click_visual{target} / read_visual{question}, or " : ""}screenshot, then click_at{x,y} with the screen point it tells you how to compute.
 - Errors about Accessibility permission or a locked screen: stop and tell the user; retrying won't help.

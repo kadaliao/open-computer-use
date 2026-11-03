@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Shot } from "./vision.ts";
 
 export type Element = { ref: string; role: string; label: string; f?: [number, number, number, number] };
-export type Observation = { app: string; window: string; elements: Element[]; error?: string };
+export type Observation = { app: string; window: string; elements: Element[]; others?: string[]; error?: string };
 export type Action =
   | { action: "press"; ref: string }
   | { action: "set_value"; ref: string; text: string }
@@ -67,5 +67,7 @@ export const render = (o: Observation) => {
   if (o.error || !o.elements) return `error: ${o.error ?? JSON.stringify(o)}`;
   const labeled = o.elements.filter((e) => e.label).length;
   const sparse = labeled < 5 ? "\n(accessibility info is sparse here: use click_visual / read_visual)" : "";
-  return `app: ${o.app} | window: ${o.window}${sparse}\n` + o.elements.map((e) => `${e.ref} ${e.role} "${e.label}"`).join("\n");
+  const n = o.others?.length ?? 0;
+  const others = n ? `\nother windows of this app (${n}): ${o.others!.slice(0, 8).map((t) => `"${t}"`).join(", ")}${n > 8 ? ", ..." : ""}` : "";
+  return `app: ${o.app} | window: ${o.window}${others}${sparse}\n` + o.elements.map((e) => `${e.ref} ${e.role} "${e.label}"`).join("\n");
 };
