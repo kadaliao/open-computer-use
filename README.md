@@ -30,7 +30,7 @@ Add this to `~/.dsh/cordis.patch.yml` under `insert:`, then restart the app:
         command: /Users/<you>/.local/share/ocu/ocu
         args: [mcp]
 
-Grant **DeepSeek Harness** Accessibility permission (System Settings > Privacy & Security > Accessibility). macOS checks the app that launches the helper, not the terminal. GUI apps don't inherit your shell variables, so `click_visual`/`read_visual`/`run_task`, which need model keys, only work if the keys are passed in the server's `env` config. `observe`/`act` need no keys.
+Grant **DeepSeek Harness** Accessibility permission (System Settings > Privacy & Security > Accessibility). macOS checks the app that launches the helper, not the terminal. GUI apps don't inherit your shell variables, so `click_visual`/`read_visual`/`run_task`, which need model keys, only appear if the keys are passed in the server's `env` config. `observe`/`act` need no keys.
 
 ## Use from another agent (MCP)
 The tool brings no model of its own. Under MCP, the calling agent (Claude Code, Codex, Cursor...) does the thinking and these tools give it a fast, exact view of the UI:
@@ -38,8 +38,12 @@ The tool brings no model of its own. Under MCP, the calling agent (Claude Code, 
     claude mcp add ocu -- bun /path/to/open-computer-use/core/src/mcp.ts
 
 - `observe {app?}`: elements of an app's window. Pass `app` (e.g. "Calculator"; localized names and bundle ids also work), because the caller's own terminal is usually frontmost.
-- `act {action, ..., then?}`: run one action, or a batch via `then`, and get the updated screen back, so no separate observe is needed.
-- `click_visual` / `read_visual`: screenshot fallback.
+- `act {action, ..., then?}`: run one action, or a batch via `then`, and get the updated screen back, so no separate observe is needed. The reply starts with what changed (new elements, or "did not change" when the action had no effect).
+- `screenshot`: image of the window plus the formula to turn image pixels into a `click_at` point. Needs no keys; for callers that can read images.
+- The server also sends usage instructions (the observe → act loop, when to batch, what to do when stuck), so weaker models don't have to work it out.
+
+Optional, shown only when their keys are configured:
+- `click_visual` / `read_visual`: screenshot fallback through a vision model, for callers that can't read images.
 - `run_task {goal}`: hand the whole goal to the built-in agent (uses its own planner key).
 
 Measured: Claude Code (Sonnet) computed 789 × 36 on Calculator in 4 turns, 19 s, using a batched `act`. Without batching the same task took 11 turns and 45 s.

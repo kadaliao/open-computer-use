@@ -9,7 +9,7 @@ const env = process.env;
 export const VISION_MODEL = env.OCU_VISION_MODEL ?? "step-gui";
 
 /** Shrink to a model-friendly size; returns base64 PNG and its pixel size. */
-function prepare(path: string, maxSide = Number(env.OCU_VISION_MAX ?? 1280)) {
+export function prepare(path: string, maxSide = Number(env.OCU_VISION_MAX ?? 1280)) {
   const out = path.replace(/\.png$/, "-s.png");
   execFileSync("sips", ["-Z", String(maxSide), path, "--out", out], { stdio: "ignore" });
   const info = execFileSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", out]).toString();

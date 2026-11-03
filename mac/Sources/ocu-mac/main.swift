@@ -75,6 +75,10 @@ func frontmostApp() -> NSRunningApplication? {
 func observe(_ appName: String? = nil) -> [String: Any] {
   refs = [:]; refInfo = [:]
   if !AXIsProcessTrusted() { return ["error": noPermission] }
+  // A locked screen hides every window from accessibility (only menu bars remain), which looks like a broken app.
+  if let d = CGSessionCopyCurrentDictionary() as? [String: Any], (d["CGSSessionScreenIsLocked"] as? Bool) == true {
+    return ["error": "the screen is locked, so no app windows can be read or used. Ask the user to unlock the Mac; retrying won't help."]
+  }
   var target: NSRunningApplication? = nil
   if let n = appName?.lowercased(), !n.isEmpty {
     // Match the localized name ("计算器"), the bundle file name ("Calculator") or the bundle id.
@@ -88,20 +92,29 @@ func observe(_ appName: String? = nil) -> [String: Any] {
   currentApp = app
   let root = AXUIElementCreateApplication(app.processIdentifier)
   var els: [[String: Any]] = []
-  let win = attr(root, kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
+  // Background apps often report no focused window; fall back to the main or first window so we never
+  // walk the whole app (its closed menus alone would use up the element budget).
+  // Some apps answer with the application element itself when no window is open: only accept real windows.
+  let isWindow = { (e: AXUIElement) in ["AXWindow", "AXSheet", "AXDialog"].contains(attr(e, kAXRoleAttribute) as? String ?? "") }
+  let candidates = [attr(root, kAXFocusedWindowAttribute), attr(root, kAXMainWindowAttribute)].compactMap { $0.map { $0 as! AXUIElement } }
+    + ((attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? [])
+  let win = candidates.first(where: isWindow)
   currentWindow = win
   collectDeadline = Date().addingTimeInterval(3)
-  collect(win ?? root, depth: 0, out: &els)
-  // Menu bar items are reachable even when the window has little to offer.
+  if let w = win { collect(w, depth: 0, out: &els) }
+  // Menu bar items are reachable even when the window has little to offer. Only an open menu's items are
+  // listed: closed menus would add hundreds of lines nobody asked for (menu{path} reaches them anyway).
   if let bar = attr(root, kAXMenuBarAttribute) {
     for item in (attr(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] ?? []).dropFirst() {
       let ref = "e\(refs.count)"; refs[ref] = item
       let l = label(item); refInfo[ref] = "MenuBarItem \(l)"
       els.append(["ref": ref, "role": "MenuBarItem", "label": l])
+      if (attr(item, kAXSelectedAttribute) as? Bool) == true { collect(item, depth: 0, out: &els) }
     }
   }
   if let w = win, let f = frame(w) { Overlay.shared.glowWindow(f) }
-  return ["app": app.localizedName ?? "", "window": win.flatMap { attr($0, kAXTitleAttribute) as? String } ?? "", "elements": els]
+  let title = win.map { attr($0, kAXTitleAttribute) as? String ?? "" } ?? "(no open window: open one with key cmd+n or a menu)"
+  return ["app": app.localizedName ?? "", "window": title, "elements": els]
 }
 
 // MARK: - Text search
@@ -422,8 +435,21 @@ final class Overlay {
 
   func onMain(_ f: @escaping () -> Void) { if enabled { DispatchQueue.main.async(execute: f) } }
 
+  /// The helper outlives each action, so clear the highlight once things go quiet;
+  /// otherwise it sits on a window the agent has long since left.
+  var activity = 0
+  func scheduleClear() {
+    activity += 1
+    let mine = activity
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+      guard mine == self.activity else { return }
+      self.view.windowGlow = nil; self.view.elementGlow = nil; self.view.cursor = nil
+      self.view.needsDisplay = true
+    }
+  }
+
   func glowWindow(_ axFrame: CGRect) {
-    onMain { self.view.windowGlow = self.toView(axFrame); self.view.elementGlow = nil; self.view.needsDisplay = true }
+    onMain { self.view.windowGlow = self.toView(axFrame); self.view.elementGlow = nil; self.view.needsDisplay = true; self.scheduleClear() }
   }
 
   /// Fly the virtual cursor along a curved path to the element and highlight it. Blocks until done.
@@ -449,7 +475,7 @@ final class Overlay {
         self.view.cursor = CGPoint(x: u * u * start.x + 2 * u * t * ctrl.x + t * t * end.x,
                                    y: u * u * start.y + 2 * u * t * ctrl.y + t * t * end.y)
         self.view.needsDisplay = true
-        if raw >= 1 { self.view.elementGlow = target; timer.invalidate(); done.signal() }
+        if raw >= 1 { self.view.elementGlow = target; timer.invalidate(); self.scheduleClear(); done.signal() }
       }
     }
     done.wait()
