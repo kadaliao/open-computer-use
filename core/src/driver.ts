@@ -8,10 +8,11 @@ import type { Shot } from "./vision.ts";
 export type Element = { ref: string; role: string; label: string; f?: [number, number, number, number] };
 export type Observation = { app: string; window: string; elements: Element[]; others?: string[]; error?: string };
 export type Action =
-  | { action: "press"; ref: string }
+  | { action: "press"; ref: string; extend?: boolean }
   | { action: "set_value"; ref: string; text: string }
   | { action: "type"; text: string }
-  | { action: "key"; key: string }
+  | { action: "key"; key: string; repeat?: number }
+  | { action: "scroll"; ref?: string; direction?: "up" | "down"; amount?: number }
   | { action: "open_app"; name: string }
   | { action: "open_url"; url: string }
   | { action: "menu"; path: string[] }

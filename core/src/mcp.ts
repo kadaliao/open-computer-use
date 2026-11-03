@@ -33,6 +33,10 @@ Picking an action:
 - Text fields: set_value{ref,text} (or type{text,ref}); press return with key{key:"return"} if needed.
 - Commands are often faster through menu{path:[...]} or a shortcut key{key:"cmd+n"} than through buttons.
 - Long pages: find_text{text} searches the whole window, including off-screen content.
+- Lists: a "showing N of M rows" line means rows are hidden: scroll{ref,direction} it, or find_text.
+- Table rows (files in Finder, mails): press{ref} on a row or its name selects it; press{ref, extend:true} adds it to the selection.
+- Repeated keys: key{key:"down", repeat:5} instead of listing the same key many times.
+- Finder sizes: select the folder and use cmd+i; with many files selected, use cmd+ctrl+i (one summary window), not cmd+i (one window per file).
 - Open things with open_app / open_url instead of clicking around Finder or the Dock.
 When stuck:
 - Watch "other windows of this app": an action may open several windows at once. Close extras in one batch or with a "close all" shortcut instead of one per step.
@@ -79,12 +83,18 @@ const show = (o: Observation) => {
  * action did nothing: a false "did not change" makes callers repeat the action.
  */
 async function settled(app?: string): Promise<Observation> {
+  // The app was quit (cmd+q): follow whatever is in front now instead of reporting "app not running".
+  const read = async () => {
+    const o = await driver.observe(app);
+    if (app && o.error?.startsWith("app not running")) { lastApp = app = undefined; return driver.observe(); }
+    return o;
+  };
   const before = lastObs ? render(lastObs) : undefined;
   const t0 = Date.now();
-  let prev = await driver.observe(app), stable = 0;
+  let prev = await read(), stable = 0;
   while (Date.now() - t0 < 4000) {
     await new Promise((r) => setTimeout(r, 150));
-    const cur = await driver.observe(app);
+    const cur = await read();
     stable = render(cur) === render(prev) ? stable + 1 : 0;
     prev = cur;
     const moved = render(cur) !== before;
@@ -95,19 +105,27 @@ async function settled(app?: string): Promise<Observation> {
 
 server.tool("observe",
   "List the elements of a macOS app's focused window as `ref Role \"label\"` lines (refs reset on every observe). " +
-  "Pass `app` (name or bundle id) to target an app without bringing it forward; otherwise the frontmost app (often your own terminal) is read. " +
+  "Pass `app` (name or bundle id) to target an app; its window is brought to the front. Otherwise the frontmost app (often your own terminal) is read. " +
   "The app is remembered for later calls.",
   { app: z.string().optional() },
   async ({ app }) => { if (app) lastApp = app; lastObs = await driver.observe(lastApp); return text(render(lastObs)); });
 
 const one = {
-  action: z.enum(["press", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at"]),
+  action: z.enum(["press", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at", "scroll"]),
   ref: z.string().optional(), text: z.string().optional(), key: z.string().optional(), name: z.string().optional(),
   url: z.string().optional(), path: z.array(z.string()).optional(), x: z.number().optional(), y: z.number().optional(),
+  repeat: z.number().int().min(1).max(50).optional(), extend: z.boolean().optional(),
+  direction: z.enum(["up", "down"]).optional(), amount: z.number().int().optional(),
 };
+/** Run one action, keeping track of which app later calls should read. */
+async function run(a: any) {
+  if (a.action === "open_app" && a.name) lastApp = a.name;
+  if (a.action === "open_url") lastApp = undefined;  // the browser comes forward
+  return driver.act(a.action === "find_text" ? { action: "find_text", query: a.text } : a);
+}
 server.tool("act",
   "Perform one action, then return the updated screen (same format as observe). Refs come from the latest observe/act. " +
-  "press{ref} | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key} e.g. \"cmd+shift+g\", \"return\" | " +
+  "press{ref, extend?} (on a table row: select it; extend adds to selection) | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key, repeat?} e.g. \"cmd+shift+g\", \"return\" | scroll{ref?, direction, amount?} | " +
   "open_app{name} | open_url{url} | menu{path:[\"File\",\"New Folder\"]} | find_text{text} search the whole window, incl. off-screen text | " +
   "click_at{x,y} global screen point. Keyboard actions bring the observed app forward first. " +
   "Work from refs: the reply already shows the new screen (menus and popups included), so don't take your own screenshots or guess coordinates; " +
@@ -117,16 +135,13 @@ server.tool("act",
     if (then?.length) {
       const results = [];
       for (const x of [a, ...then]) {
-        const r = await driver.act(x as any); results.push(r);
+        const r = await run(x); results.push(r);
         if (r.error) break;
         await new Promise((res) => setTimeout(res, 60));
       }
       return text(`results: ${JSON.stringify(results)}\n\n${show(await settled(lastApp))}`);
     }
-    if (a.action === "open_app" && a.name) lastApp = a.name;
-    if (a.action === "open_url") lastApp = undefined;  // the browser comes forward
-    const req: any = a.action === "find_text" ? { action: "find_text", query: a.text } : a;
-    const res = await driver.act(req);
+    const res = await run(a);
     if (a.action === "find_text") return text(JSON.stringify(res));
     const obs = await settled(lastApp);
     return text(`result: ${JSON.stringify(res)}\n\n${show(obs)}`);

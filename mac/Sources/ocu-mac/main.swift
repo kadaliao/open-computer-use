@@ -34,12 +34,41 @@ func label(_ e: AXUIElement) -> String {
     .compactMap { attr(e, $0) as? String }.first { !$0.isEmpty } ?? ""
 }
 
+/// Match the localized name ("计算器"), the bundle file name ("Calculator") or the bundle id.
+func runningApp(_ name: String) -> NSRunningApplication? {
+  let n = name.lowercased()
+  let names = { (a: NSRunningApplication) -> [String] in
+    [a.localizedName, a.bundleURL?.deletingPathExtension().lastPathComponent, a.bundleIdentifier].compactMap { $0?.lowercased() } }
+  let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+  return apps.first { names($0).contains(n) } ?? apps.first { names($0).contains { $0.contains(n) } }
+}
+
+/// Texts inside an element (e.g. a table row's cells), for labelling rows that have no title of their own.
+func innerText(_ e: AXUIElement, depth: Int = 0, into acc: inout [String]) {
+  if depth > 4 || acc.count >= 3 { return }
+  let role = attr(e, kAXRoleAttribute) as? String ?? ""
+  if ["AXStaticText", "AXTextField"].contains(role), let v = attr(e, kAXValueAttribute) as? String, !v.isEmpty { acc.append(v); return }
+  for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { innerText(c, depth: depth + 1, into: &acc) }
+}
+
+/// The table row an element sits in (itself, or an ancestor a few levels up).
+func enclosingRow(_ e: AXUIElement) -> AXUIElement? {
+  var node: AXUIElement? = e
+  for _ in 0..<4 {
+    guard let n = node else { return nil }
+    if (attr(n, kAXRoleAttribute) as? String) == "AXRow" { return n }
+    node = attr(n, kAXParentAttribute).map { $0 as! AXUIElement }
+  }
+  return nil
+}
+
 var collectDeadline = Date.distantFuture  // observe gives up after a few seconds on huge or slow apps
 func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
   if depth > 40 || out.count > 400 || Date() > collectDeadline { return }
   let role = attr(e, kAXRoleAttribute) as? String ?? ""
   if interactiveRoles.contains(role) {
-    let l = String(label(e).prefix(80))
+    var l = String(label(e).prefix(80))
+    if role == "AXRow" && l.isEmpty { var t: [String] = []; innerText(e, into: &t); l = String(t.joined(separator: " | ").prefix(80)) }
     // Static text is only useful as context when it says something.
     if role != "AXStaticText" || !l.isEmpty {
       let ref = "e\(refs.count)"
@@ -55,9 +84,17 @@ func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
   // the window, so only their visible rows (or the first 30) are listed.
   var kids = (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? []
   if ["AXTable", "AXOutline", "AXList"].contains(role) {
+    let total = (attr(e, kAXRowsAttribute) as? [AXUIElement])?.count ?? kids.count
     if let vis = attr(e, kAXVisibleRowsAttribute) as? [AXUIElement], !vis.isEmpty { kids = vis }
     else if let vis = attr(e, kAXVisibleChildrenAttribute) as? [AXUIElement], !vis.isEmpty { kids = vis }
     kids = Array(kids.prefix(30))
+    // Say so when rows are hidden, so the caller scrolls instead of assuming the list is complete.
+    if total > kids.count {
+      let ref = "e\(refs.count)"; refs[ref] = e
+      let l = "showing \(kids.count) of \(total) rows: scroll{ref:\"\(ref)\"} for more, or find_text"
+      refInfo[ref] = "List \(l)"
+      out.append(["ref": ref, "role": "List", "label": l])
+    }
   }
   for c in kids { collect(c, depth: depth + 1, out: &out) }
 }
@@ -80,13 +117,9 @@ func observe(_ appName: String? = nil) -> [String: Any] {
     return ["error": "the screen is locked, so no app windows can be read or used. Ask the user to unlock the Mac; retrying won't help."]
   }
   var target: NSRunningApplication? = nil
-  if let n = appName?.lowercased(), !n.isEmpty {
-    // Match the localized name ("计算器"), the bundle file name ("Calculator") or the bundle id.
-    let names = { (a: NSRunningApplication) -> [String] in
-      [a.localizedName, a.bundleURL?.deletingPathExtension().lastPathComponent, a.bundleIdentifier].compactMap { $0?.lowercased() } }
-    let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
-    target = apps.first { names($0).contains(n) } ?? apps.first { names($0).contains { $0.contains(n) } }
-    if target == nil { return ["error": "app not running: \(appName!)"] }
+  if let n = appName, !n.isEmpty {
+    target = runningApp(n)
+    if target == nil { return ["error": "app not running: \(n)"] }
   }
   guard let app = target ?? frontmostApp() else { return ["error": "no frontmost app"] }
   currentApp = app
@@ -100,6 +133,8 @@ func observe(_ appName: String? = nil) -> [String: Any] {
     + ((attr(root, kAXWindowsAttribute) as? [AXUIElement]) ?? [])
   let win = candidates.first(where: isWindow)
   currentWindow = win
+  // Bring the chosen window to the front so the user sees what the agent is working on.
+  raiseTarget()
   collectDeadline = Date().addingTimeInterval(3)
   if let w = win { collect(w, depth: 0, out: &els) }
   // Menu bar items are reachable even when the window has little to offer. Only an open menu's items are
@@ -140,7 +175,7 @@ func findText(_ query: String) -> [String: Any] {
   // Climb up to 3 ancestors until the context says more than the hit itself (e.g. table header -> row).
   func walk(_ e: AXUIElement, _ depth: Int, _ ancestors: [AXUIElement]) {
     visited += 1
-    if depth > 80 || visited > 20000 || hits.count >= 8 { return }
+    if depth > 80 || visited > 20000 || hits.count >= 40 { return }
     let l = label(e)
     if !l.isEmpty && l.lowercased().contains(q) {
       var joined = l
@@ -157,7 +192,7 @@ func findText(_ query: String) -> [String: Any] {
     for c in (attr(e, kAXChildrenAttribute) as? [AXUIElement]) ?? [] { walk(c, depth + 1, next) }
   }
   walk(win as! AXUIElement, 0, [])
-  return ["hits": hits]
+  return ["hits": hits, "truncated": hits.count >= 40]
 }
 
 // MARK: - Screenshot
@@ -167,7 +202,14 @@ func findText(_ query: String) -> [String: Any] {
 func screenshot() -> [String: Any] {
   guard let app = currentApp ?? frontmostApp() else { return ["error": "no app"] }
   let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-  guard let w = list.first(where: { ($0[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 0 }),
+  let mine = list.filter { ($0[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier && ($0[kCGWindowLayer as String] as? Int) == 0 }
+  let area = { (w: [String: Any]) -> CGFloat in let b = w[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]; return (b["Width"] ?? 0) * (b["Height"] ?? 0) }
+  // Prefer the window we observed (matched by frame); otherwise the biggest one, not some tiny helper window.
+  let target = currentWindow.flatMap(frame)
+  let match = target.flatMap { t in mine.first { w in
+    let b = w[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
+    return abs((b["X"] ?? 0) - t.minX) < 2 && abs((b["Y"] ?? 0) - t.minY) < 2 && abs((b["Width"] ?? 0) - t.width) < 2 } }
+  guard let w = match ?? mine.max(by: { area($0) < area($1) }),
         let wid = w[kCGWindowNumber as String] as? Int,
         let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return ["error": "no window"] }
   let path = NSTemporaryDirectory() + "ocu-shot-\(getpid()).png"
@@ -196,19 +238,35 @@ func focusTarget() {
   guard let app = currentApp else { return }
   // Always activate: the cached frontmost/isActive values can be stale.
   app.activate()
+  if let w = currentWindow { AXUIElementPerformAction(w, kAXRaiseAction as CFString) }
   Thread.sleep(forTimeInterval: 0.1)
+}
+
+/// Activate the observed app and raise the observed window above the app's other windows.
+func raiseTarget() {
+  guard let app = currentApp else { return }
+  if let w = currentWindow {
+    AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
+    AXUIElementPerformAction(w, kAXRaiseAction as CFString)
+  }
+  if !app.isActive { app.activate(); Thread.sleep(forTimeInterval: 0.15) }
 }
 
 // Input goes through the normal system path; focusTarget() has already put the observed app in front.
 // (Posting straight to the app's pid drops typed text in apps like Notes.)
 func send(_ ev: CGEvent?) { ev?.post(tap: .cghidEventTap) }
 
+/// Press modifiers down for real and release them afterwards: flags on the key event alone can leave
+/// the system thinking a modifier is still held (selection kept extending, later clicks shift-clicked).
 func postKey(_ code: CGKeyCode, flags: CGEventFlags = []) {
-  for down in [true, false] {
-    let ev = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
-    ev?.flags = flags
-    send(ev)
+  let mods: [(CGEventFlags, CGKeyCode)] = [(.maskCommand, 55), (.maskShift, 56), (.maskAlternate, 58), (.maskControl, 59)].filter { flags.contains($0.0) }
+  var held: CGEventFlags = []
+  func post(_ k: CGKeyCode, _ down: Bool) {
+    let ev = CGEvent(keyboardEventSource: nil, virtualKey: k, keyDown: down); ev?.flags = held; send(ev)
   }
+  for (f, k) in mods { held.insert(f); post(k, true) }
+  post(code, true); post(code, false)
+  for (f, k) in mods.reversed() { held.remove(f); post(k, false) }
 }
 
 /// Click a menu item by its title path, e.g. ["前往", "下载"]. Matches titles exactly first, then by prefix.
@@ -265,6 +323,18 @@ func act(_ r: [String: Any]) -> [String: Any] {
   case "press":
     guard let el else { return ["error": "unknown ref"] }
     Overlay.shared.ripple()
+    // A file name or cell in a table: AXPress on it does nothing, so select its row instead.
+    // extend:true adds the row to the current selection (like cmd-click).
+    let role = attr(el, kAXRoleAttribute) as? String ?? ""
+    if ["AXRow", "AXCell", "AXStaticText", "AXTextField", "AXImage"].contains(role), let row = enclosingRow(el),
+       let table = attr(row, kAXParentAttribute).map({ $0 as! AXUIElement }) {
+      var rows = (r["extend"] as? Bool) == true ? (attr(table, kAXSelectedRowsAttribute) as? [AXUIElement]) ?? [] : []
+      if !rows.contains(where: { CFEqual($0, row) }) { rows.append(row) }
+      if AXUIElementSetAttributeValue(table, kAXSelectedRowsAttribute as CFString, rows as CFArray) == .success {
+        res["via"] = "select"; res["selected"] = rows.count
+        break
+      }
+    }
     // Plain text reports success for AXPress but does nothing, so click it for real.
     let isText = (attr(el, kAXRoleAttribute) as? String) == "AXStaticText"
     // Web content (Electron apps, browsers) often answers AXPress with "success" and ignores it:
@@ -307,6 +377,7 @@ func act(_ r: [String: Any]) -> [String: Any] {
         let ev = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: down)
         var c = ch
         ev?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &c)
+        ev?.flags = []
         send(ev)
       }
     }
@@ -325,12 +396,31 @@ func act(_ r: [String: Any]) -> [String: Any] {
     }
     guard let k = parts.last.flatMap({ keyCodes[$0] }) else { return ["error": "unknown key"] }
     focusTarget()
-    postKey(k, flags: flags)
+    let times = max(1, min(50, (r["repeat"] as? Int) ?? 1))
+    for i in 0..<times { if i > 0 { usleep(30_000) }; postKey(k, flags: flags) }
+  case "scroll":
+    // Scroll wheel over the element (or the observed window). direction: down/up, amount in pages-ish lines.
+    // A table's own frame spans all its rows (mostly off-screen): aim at the visible part of it.
+    let win = currentWindow.flatMap(frame)
+    var f = el.flatMap(frame) ?? win
+    if let e = el, let p = attr(e, kAXParentAttribute).map({ $0 as! AXUIElement }),
+       (attr(p, kAXRoleAttribute) as? String) == "AXScrollArea", let pf = frame(p) { f = pf }
+    if let w = win, let g = f { f = g.intersection(w).isNull ? w : g.intersection(w) }
+    guard let f else { return ["error": "nothing to scroll"] }
+    focusTarget()
+    let lines = Int32(((r["amount"] as? Int) ?? 10)) * ((r["direction"] as? String) == "up" ? 1 : -1)
+    let saved = CGEvent(source: nil)?.location
+    CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: CGPoint(x: f.midX, y: f.midY), mouseButton: .left)?.post(tap: .cghidEventTap)
+    usleep(30_000)
+    CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+    usleep(150_000)
+    if let saved { CGWarpMouseCursorPosition(saved) }
   case "find_text":
     let found = findText(r["query"] as? String ?? "")
     if let err = found["error"] { return ["error": err] }
     let hits = found["hits"] as? [String] ?? []
     res["note"] = hits.isEmpty ? "no text found" : hits.joined(separator: "\n")
+      + ((found["truncated"] as? Bool) == true ? "\n(only the first \(hits.count) hits; use a more specific text)" : "")
   case "click_at":
     // Global point (top-left origin). Real click; the user's cursor is put back afterwards.
     guard let x = r["x"] as? Double, let y = r["y"] as? Double else { return ["error": "click_at needs x,y"] }
@@ -355,6 +445,12 @@ func act(_ r: [String: Any]) -> [String: Any] {
     do { try p.run(); p.waitUntilExit() } catch { return ["error": "\(error)"] }
     if p.terminationStatus != 0 { return ["error": "open failed"] }
     Thread.sleep(forTimeInterval: 1.0)
+    // Later keystrokes in the same batch must go to this app, not the one observed before.
+    if let a = runningApp(name) ?? frontmostApp() {
+      currentApp = a
+      let root = AXUIElementCreateApplication(a.processIdentifier)
+      currentWindow = [kAXFocusedWindowAttribute, kAXMainWindowAttribute].lazy.compactMap { attr(root, $0).map { $0 as! AXUIElement } }.first
+    }
   case "open_url":
     guard let u = URL(string: r["url"] as? String ?? "") else { return ["error": "bad url"] }
     NSWorkspace.shared.open(u)
