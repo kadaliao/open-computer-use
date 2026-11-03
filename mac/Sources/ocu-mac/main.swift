@@ -63,14 +63,19 @@ func enclosingRow(_ e: AXUIElement) -> AXUIElement? {
 }
 
 var collectDeadline = Date.distantFuture  // observe gives up after a few seconds on huge or slow apps
-func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
+func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]], inRow: Bool = false) {
   if depth > 40 || out.count > 400 || Date() > collectDeadline { return }
   let role = attr(e, kAXRoleAttribute) as? String ?? ""
-  if interactiveRoles.contains(role) {
+  // A row already carries its cells' text in its label, so the cells themselves would only repeat it
+  // (Finder lists 5 lines per file otherwise). Buttons and checkboxes inside rows are still listed.
+  let cellish = ["AXCell", "AXStaticText", "AXTextField", "AXImage"].contains(role)
+  var rowLabelled = false
+  if interactiveRoles.contains(role) && !(inRow && cellish) {
     var l = String(label(e).prefix(80))
     if role == "AXRow" && l.isEmpty { var t: [String] = []; innerText(e, into: &t); l = String(t.joined(separator: " | ").prefix(80)) }
+    if role == "AXRow" && !l.isEmpty { rowLabelled = true }
     // Static text is only useful as context when it says something.
-    if role != "AXStaticText" || !l.isEmpty {
+    if !(["AXStaticText", "AXCell"].contains(role) && l.isEmpty) {
       let ref = "e\(refs.count)"
       refs[ref] = e
       let r = String(role.dropFirst(2)).replacingOccurrences(of: "StaticText", with: "Text")
@@ -96,7 +101,7 @@ func collect(_ e: AXUIElement, depth: Int, out: inout [[String: Any]]) {
       out.append(["ref": ref, "role": "List", "label": l])
     }
   }
-  for c in kids { collect(c, depth: depth + 1, out: &out) }
+  for c in kids { collect(c, depth: depth + 1, out: &out, inRow: inRow || rowLabelled) }
 }
 
 // NSWorkspace.frontmostApplication goes stale without a run loop; the window list is reliable.

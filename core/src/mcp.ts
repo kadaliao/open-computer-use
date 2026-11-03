@@ -92,13 +92,16 @@ async function settled(app?: string): Promise<Observation> {
   const before = lastObs ? render(lastObs) : undefined;
   const t0 = Date.now();
   let prev = await read(), stable = 0;
+  // A change that holds for one more read is done. With no change at all, keep watching a little longer
+  // for late starters (page loads), but not so long that every no-op costs seconds.
+  const isBrowser = /safari|chrome|edge|firefox|arc|浏览器/i.test(prev.app ?? "");
   while (Date.now() - t0 < 4000) {
-    await new Promise((r) => setTimeout(r, 150));
+    await new Promise((r) => setTimeout(r, 100));
     const cur = await read();
     stable = render(cur) === render(prev) ? stable + 1 : 0;
     prev = cur;
     const moved = render(cur) !== before;
-    if (stable >= 2 && (moved || Date.now() - t0 >= 1200)) break;
+    if (moved ? stable >= 1 : stable >= 2 && Date.now() - t0 >= (isBrowser ? 1200 : 600)) break;
   }
   return prev;
 }
