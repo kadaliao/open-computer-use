@@ -73,14 +73,22 @@ const show = (o: Observation) => {
   return `${head}\n${r}`;
 };
 
-/** Re-read until the UI stops changing (window opened, page loaded). */
+/**
+ * Re-read until the UI stops changing (window opened, page loaded). A web page often takes a few hundred ms
+ * to start navigating, so when nothing has changed yet keep watching for a while before concluding the
+ * action did nothing: a false "did not change" makes callers repeat the action.
+ */
 async function settled(app?: string): Promise<Observation> {
-  let prev = await driver.observe(app);
-  for (let t = 0; t < 2000; t += 150) {
+  const before = lastObs ? render(lastObs) : undefined;
+  const t0 = Date.now();
+  let prev = await driver.observe(app), stable = 0;
+  while (Date.now() - t0 < 4000) {
     await new Promise((r) => setTimeout(r, 150));
     const cur = await driver.observe(app);
-    if (render(cur) === render(prev)) return cur;
+    stable = render(cur) === render(prev) ? stable + 1 : 0;
     prev = cur;
+    const moved = render(cur) !== before;
+    if (stable >= 2 && (moved || Date.now() - t0 >= 1200)) break;
   }
   return prev;
 }
