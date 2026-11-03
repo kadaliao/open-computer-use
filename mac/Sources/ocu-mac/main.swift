@@ -448,8 +448,13 @@ func act(_ r: [String: Any]) -> [String: Any] {
     p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
     p.arguments = ["-a", name]
     do { try p.run(); p.waitUntilExit() } catch { return ["error": "\(error)"] }
-    if p.terminationStatus != 0 { return ["error": "open failed"] }
-    Thread.sleep(forTimeInterval: 1.0)
+    if p.terminationStatus != 0 { return ["error": "no app named \(name)"] }
+    // `open` succeeds even when the app dies on launch, so wait until it is really running (Electron apps
+    // take a few seconds) and say so if it never shows up.
+    var up = false
+    for _ in 0..<40 { if runningApp(name) != nil { up = true; break }; Thread.sleep(forTimeInterval: 0.2) }
+    if !up { return ["error": "\(name) was launched but is not running (it quit on start or is still loading); retry once with open_app, then report it"] }
+    Thread.sleep(forTimeInterval: 0.6)
     // Later keystrokes in the same batch must go to this app, not the one observed before.
     if let a = runningApp(name) ?? frontmostApp() {
       currentApp = a
@@ -617,6 +622,9 @@ app.setActivationPolicy(.accessory)  // no Dock icon, never steals focus
 Overlay.shared.setup()
 
 Thread.detachNewThread {
+  // Hosts built on Electron (DeepSeek Harness, VS Code...) set this for their child processes. Passed on
+  // to an app we open, it makes Electron apps (WorkBuddy, Slack...) start as plain Node and quit at once.
+  for k in ["ELECTRON_RUN_AS_NODE", "ELECTRON_NO_ATTACH_CONSOLE"] { unsetenv(k) }
   while let line = readLine() {
     guard let req = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
     let cmd = req["cmd"] as? String
