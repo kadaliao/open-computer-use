@@ -106,6 +106,44 @@ While it runs, ocu-mac draws an overlay: a virtual cursor that moves along a cur
     bun bench/mcp-perf.ts label                     # MCP tool calls as a caller sees them: time and reply size
 Results are saved to `core/bench/results/`. Tasks are in `core/bench/tasks.ts`; each one is checked against the real screen afterwards. The summary gives planner calls per task and the time split (observe, model, waits, actions). `OCU_SETTLE_LOG=1` prints, for every wait for the screen, how long it took and when the change first showed.
 
+## Performance (0.6.0)
+Measured on a Mac mini M2 (macOS 26, with a remote-desktop session adding some load, so single numbers wobble),
+against 0.5 (commit 72c21a3) on the same machine the same day.
+
+Helper (`bench/perf.ts`, p50):
+
+| | 0.5 | 0.6 |
+|---|---|---|
+| observe Calculator / System Settings / Safari | 43 / 82 / 149 ms | 25 / 59 / 86 ms |
+| repeat read while waiting (quiet) | – | 27–60 ms |
+| press, one / six in a row | 174 / 1183 ms | 3 / 16 ms |
+| key | 112 ms | 1 ms |
+| screenshot ready for a model (1280 px) | 266 ms | 117 ms |
+
+MCP tool calls as a caller sees them (`bench/mcp-perf.ts`, 12 calls, two runs each):
+
+| | 0.5 | 0.6 |
+|---|---|---|
+| total | 7.5 s | 3.9–4.5 s |
+| one press | 418 ms | 155–182 ms |
+| batch of 6 presses | 1684 ms | 143–226 ms |
+| settings page change | 1201 ms | 529–627 ms |
+| web link, page load | 896 ms (load not seen) | 276–486 ms |
+| action with no effect | 330–780 ms | 640–680 ms (watches 600 ms for a late change) |
+| characters in the 8 act replies | 6.6k | 4.1–4.3k |
+
+Built-in agent (`bench/run.ts`, 22 tasks, DeepSeek `deepseek-chat`, cache off):
+
+| | 0.5 | 0.6 |
+|---|---|---|
+| passed | 20/22 | 22/22, 22/22 (two runs on the final code; 20–22 in four earlier runs while tuning) |
+| seconds per task | 9.8 (6.2 without one 85 s failure) | 3.9, 4.0 |
+| planner calls per task | 4.05 | 2.09, 2.23 |
+| time split per task (observe / model / waits / actions) | – | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
+
+Most of the gain is fewer planner round trips (a batch that ends in a locally checked `done`) and the helper's
+faster actions; the model is still more than half the time.
+
 ## Screenshot fallback
 When an element is missing from the accessibility tree (Electron, canvas, games), the planner can use:
 - `click_visual {target}`: screenshot the window, locate the element with a GUI grounding model, and click it. The user's cursor is put back afterwards.
