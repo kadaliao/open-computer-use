@@ -59,6 +59,7 @@ Actions:
 ${DONE}
 Calculators apply operator precedence and have no parentheses: press = to get intermediate results first.
 The element list is truncated on long pages: to read specific content, use find_text first; read_visual only for what neither shows.
+In Finder, the 前往 (Go) menu opens standard folders in one step: {"action":"menu","path":["前往","实用工具"]} (also 应用程序, 下载, 文稿, 桌面; English: Go).
 In Safari, if find_text misses text a page should have (e.g. a Wikipedia infobox), Reader mode is probably on and hides it: {"action":"menu","path":["显示","隐藏阅读器"]} (English: View > Hide Reader), then search again.
 Rules: "type" inserts text; pass the "ref" of the target text field/area when it is on your screen. Elements with role Text are read-only context.
 Prefer the menu action over guessing keyboard shortcuts. If an action had no visible effect, do not repeat it; try another way. Reply done as soon as the goal is visibly achieved.`;
