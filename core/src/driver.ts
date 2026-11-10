@@ -5,8 +5,15 @@ import { fileURLToPath } from "node:url";
 
 import type { Shot } from "./vision.ts";
 
-export type Element = { ref: string; role: string; label: string; f?: [number, number, number, number] };
-export type Observation = { app: string; window: string; elements: Element[]; others?: string[]; error?: string };
+/**
+ * One listed element. Refs are stable: the same element keeps its ref across observes (in apps that keep their
+ * element objects), and a ref is never reused for another element. Only refs from the latest observe can be acted on.
+ * value: what a titled field, pop-up button or slider holds, when it differs from the label.
+ * state: any of "checked", "mixed", "selected", "disabled" (absent = unchecked / unselected / enabled).
+ */
+export type Element = { ref: string; role: string; label: string; f?: [number, number, number, number]; value?: string; state?: string[] };
+/** window_id: the stable number of the observed window, so two windows with the same title can be told apart. */
+export type Observation = { app: string; window: string; window_id?: number; elements: Element[]; others?: string[]; error?: string };
 export type Action =
   | { action: "press"; ref: string; extend?: boolean }
   | { action: "set_value"; ref: string; text: string }
@@ -63,6 +70,10 @@ export class MacDriver {
   close() { this.dead ??= "closed"; this.proc.removeAllListeners("exit"); this.proc.kill(); }
 }
 
+/** One element as a line: `e12 CheckBox "粗体" [checked]`, `e7 PopUpButton "字体" = "Helvetica"`. */
+export const renderElement = (e: Element) =>
+  `${e.ref} ${e.role} "${e.label}"${e.value !== undefined ? ` = "${e.value}"` : ""}${e.state?.length ? ` [${e.state.join(", ")}]` : ""}`;
+
 // Compact text form of the UI: one line per interactive element, cheap for text-only models.
 export const render = (o: Observation) => {
   if (o.error || !o.elements) return `error: ${o.error ?? JSON.stringify(o)}`;
@@ -70,5 +81,5 @@ export const render = (o: Observation) => {
   const sparse = labeled < 5 ? "\n(accessibility info is sparse here: use click_visual / read_visual)" : "";
   const n = o.others?.length ?? 0;
   const others = n ? `\nother windows of this app (${n}): ${o.others!.slice(0, 8).map((t) => `"${t}"`).join(", ")}${n > 8 ? ", ..." : ""}` : "";
-  return `app: ${o.app} | window: ${o.window}${others}${sparse}\n` + o.elements.map((e) => `${e.ref} ${e.role} "${e.label}"`).join("\n");
+  return `app: ${o.app} | window: ${o.window}${others}${sparse}\n` + o.elements.map(renderElement).join("\n");
 };
