@@ -55,8 +55,8 @@ func frame(_ e: AXUIElement) -> CGRect? {
 struct Node {
   static let names = [kAXRoleAttribute, kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute, kAXHelpAttribute,
     kAXPlaceholderValueAttribute, kAXPositionAttribute, kAXSizeAttribute, kAXChildrenAttribute, kAXEnabledAttribute,
-    kAXSelectedAttribute, kAXMenuItemMarkCharAttribute]
-  let role, title, desc, help, placeholder, mark: String
+    kAXSelectedAttribute, kAXMenuItemMarkCharAttribute, kAXSubroleAttribute]
+  let role, title, desc, help, placeholder, mark, subrole: String
   let value: AnyObject?
   let frame: CGRect?
   let children: [AXUIElement]
@@ -66,7 +66,7 @@ struct Node {
     let s = { (i: Int) in v[i] as? String ?? "" }
     role = s(0); title = s(1); desc = s(2); value = v[3]; help = s(4); placeholder = s(5)
     frame = rect(v[6], v[7]); children = v[8] as? [AXUIElement] ?? []
-    enabled = v[9] as? Bool; selected = v[10] as? Bool; mark = s(11)
+    enabled = v[9] as? Bool; selected = v[10] as? Bool; mark = s(11); subrole = s(12)
   }
   var label: String { [title, desc, value as? String ?? "", help, placeholder].first { !$0.isEmpty } ?? "" }
 }
@@ -150,16 +150,28 @@ func item(_ e: AXUIElement, _ n: Node, role: String, label raw: String, web: Boo
   return it
 }
 
-struct Walk { var depth = 0, inRow = false, web = false, row: AXUIElement? = nil, rowDepth = 0 }
+struct Walk { var depth = 0, inRow = false, web = false, row: AXUIElement? = nil, rowDepth = 0, inSheet = false }
+
+// A sheet or dialog in the observed window ("Replace?" after cmd+s slides down inside the same window):
+// its title, else its first text, else "". Callers must not take the screen for done while one is up.
+var sheet: String?
+var sheetWantsText = false
+let sheetRoles: Set<String> = ["AXSheet", "AXDialog"]
 
 var collectDeadline = Date.distantFuture  // observe gives up after a few seconds on huge or slow apps
-func collect(_ e: AXUIElement, _ w: Walk, out: inout [[String: Any]]) {
+func collect(_ e: AXUIElement, _ w: Walk, node: Node? = nil, out: inout [[String: Any]]) {
   if w.depth > 40 || out.count > 400 || Date() > collectDeadline { return }
-  let n = Node(e)
+  let n = node ?? Node(e)
   let role = n.role
   var next = w; next.depth += 1
   if role == "AXWebArea" { next.web = true }
   if role == "AXRow" { next.row = e; next.rowDepth = w.depth }
+  // An alert can also be the observed window itself (a window of subrole dialog).
+  if sheetRoles.contains(role) || (w.depth == 0 && ["AXDialog", "AXSystemDialog"].contains(n.subrole)) {
+    next.inSheet = true
+    if sheet == nil { sheet = oneLine(String(n.title.prefix(80))); sheetWantsText = n.title.isEmpty }
+  }
+  if w.inSheet && sheetWantsText && role == "AXStaticText" && !n.label.isEmpty { sheet = oneLine(String(n.label.prefix(80))); sheetWantsText = false }
   // A row already carries its cells' text in its label, so the cells themselves would only repeat it
   // (Finder lists 5 lines per file otherwise). Buttons and checkboxes inside rows are still listed.
   let cellish = ["AXCell", "AXStaticText", "AXTextField", "AXImage"].contains(role)
@@ -193,6 +205,15 @@ func collect(_ e: AXUIElement, _ w: Walk, out: inout [[String: Any]]) {
       }
     }
   }
+  // The window's own children: walk an attached sheet first, so the element cap can't hide it (its controls
+  // are what has to be dealt with next). Reads each child once, as the walk would anyway.
+  if w.depth == 0 && isWindow(role) {
+    let read = kids.map { ($0, Node($0)) }
+    for (c, cn) in read.filter({ sheetRoles.contains($0.1.role) }) + read.filter({ !sheetRoles.contains($0.1.role) }) {
+      collect(c, next, node: cn, out: &out)
+    }
+    return
+  }
   for c in kids { collect(c, next, out: &out) }
 }
 
@@ -223,7 +244,22 @@ func isFrontmost(_ a: NSRunningApplication) -> Bool {
 let isWindow = { (role: String) in ["AXWindow", "AXSheet", "AXDialog"].contains(role) }
 
 func screenLocked() -> Bool {
-  (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
+  let locked = (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool == true
+  lockLock.lock(); lockedNow = locked; lockLock.unlock()
+  return locked
+}
+// For act, which runs far more often: asking the window server costs ~4 ms when it is busy (a remote desktop
+// session), more than a whole press, so the lock / unlock notifications keep this up to date instead.
+private var lockedNow = false
+private let lockLock = NSLock()
+func screenLockedCached() -> Bool { lockLock.lock(); defer { lockLock.unlock() }; return lockedNow }
+func followScreenLock() {
+  _ = screenLocked()
+  for (name, locked) in [("com.apple.screenIsLocked", true), ("com.apple.screenIsUnlocked", false)] {
+    DistributedNotificationCenter.default().addObserver(forName: .init(name), object: nil, queue: nil) { _ in
+      lockLock.lock(); lockedNow = locked; lockLock.unlock()
+    }
+  }
 }
 let lockedError = "the screen is locked, so no app windows can be read or used. Ask the user to unlock the Mac; retrying won't help."
 
@@ -257,7 +293,9 @@ func observe(_ appName: String? = nil, quiet: Bool = false) -> [String: Any] {
   // while waiting for the screen to settle pass quiet, so they don't re-raise or redraw anything.
   if !quiet { bringForward() }
   collectDeadline = Date().addingTimeInterval(3)
+  sheet = nil; sheetWantsText = false
   if let w = win { collect(w, Walk(), out: &els) }
+  let shown = sheet  // from the window walk only, not from an open menu
   // Menu bar items are reachable even when the window has little to offer. Only an open menu's items are
   // listed: closed menus would add hundreds of lines nobody asked for (menu{path} reaches them anyway).
   if let bar = r[3] {
@@ -276,6 +314,7 @@ func observe(_ appName: String? = nil, quiet: Bool = false) -> [String: Any] {
   if refNumbers.count > 20000 { let keep = Set(live.values.map(\.el)); refNumbers = refNumbers.filter { keep.contains($0.key) } }
   var res: [String: Any] = ["app": app.localizedName ?? "", "window": title, "elements": els, "others": others]
   if let w = win { res["window_id"] = number(w) }  // same number = same window (titles repeat: "Untitled")
+  if let s = shown { res["sheet"] = s }
   return res
 }
 
@@ -331,9 +370,15 @@ func writePNG(_ img: CGImage, _ path: String) -> Bool {
   return CGImageDestinationFinalize(d)
 }
 
-var shareable: SCShareableContent?  // window list for ScreenCaptureKit; fetched again when a window is missing
+// Window list for ScreenCaptureKit, kept between screenshots and fetched again when a window is missing.
+// Locked: a capture that timed out keeps running and may still store a list while the next one reads it.
+private var shareableCache: SCShareableContent?
+private let shareableLock = NSLock()
+func cachedShareable() -> SCShareableContent? { shareableLock.lock(); defer { shareableLock.unlock() }; return shareableCache }
+func cacheShareable(_ c: SCShareableContent) { shareableLock.lock(); shareableCache = c; shareableLock.unlock() }
 
 /// Capture one window in process with ScreenCaptureKit, at most `maxSide` pixels on its longer side.
+/// The result is only read after the task signals, so a task that outlives the timeout touches nothing else.
 @available(macOS 14.0, *)
 func captureWindow(_ wid: CGWindowID, size: CGSize, maxSide: Int?) -> CGImage? {
   let done = DispatchSemaphore(value: 0)
@@ -341,8 +386,11 @@ func captureWindow(_ wid: CGWindowID, size: CGSize, maxSide: Int?) -> CGImage? {
   Task {
     defer { done.signal() }
     for fresh in [false, true] {
-      if fresh || shareable == nil { shareable = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
-      guard let w = shareable?.windows.first(where: { $0.windowID == wid }) else { continue }
+      var content = fresh ? nil : cachedShareable()
+      if content == nil, let c = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) {
+        content = c; cacheShareable(c)
+      }
+      guard let w = content?.windows.first(where: { $0.windowID == wid }) else { continue }
       let filter = SCContentFilter(desktopIndependentWindow: w)
       let cfg = SCStreamConfiguration()
       let scale = CGFloat(filter.pointPixelScale)
@@ -502,6 +550,37 @@ func clickAt(_ p: CGPoint) {
   }
 }
 
+/// Insert text at an element's caret (replacing its selection) through accessibility. True only when the
+/// value really changed: some apps answer "success" and ignore it.
+func insertText(_ el: AXUIElement, _ text: String) -> Bool {
+  let before = attr(el, kAXValueAttribute) as? String
+  return AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString) == .success
+    && (attr(el, kAXValueAttribute) as? String) != before
+}
+
+/// The text field or area that has keyboard focus in the observed app (e.g. Finder's rename field), if any.
+func focusedText() -> (el: AXUIElement, role: String)? {
+  guard let app = currentApp, let f = attr(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute),
+        CFGetTypeID(f) == AXUIElementGetTypeID() else { return nil }
+  let e = f as! AXUIElement
+  let role = attr(e, kAXRoleAttribute) as? String ?? ""
+  return ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"].contains(role) ? (e, role) : nil
+}
+
+/// Whether an element sits in a web page. A listed element says so from the walk that found it; any other
+/// is climbed up to 40 parents (one call each).
+func inWebArea(_ e: AXUIElement) -> Bool {
+  if let n = refNumbers[e], let t = live["e\(n)"], CFEqual(t.el, e) { return t.web }
+  var node = e
+  for _ in 0..<40 {
+    let v = attrs(node, [kAXRoleAttribute, kAXParentAttribute])
+    if (v[0] as? String) == "AXWebArea" { return true }
+    guard let p = v[1], CFGetTypeID(p) == AXUIElementGetTypeID() else { return false }
+    node = p as! AXUIElement
+  }
+  return false
+}
+
 /// Focused or main window of an app we just brought up, so later input in the same batch goes there.
 func frontWindow(_ a: NSRunningApplication) -> AXUIElement? {
   let v = attrs(AXUIElementCreateApplication(a.processIdentifier), [kAXFocusedWindowAttribute, kAXMainWindowAttribute])
@@ -512,7 +591,7 @@ func act(_ r: [String: Any]) -> [String: Any] {
   let action = r["action"] as? String ?? ""
   if !AXIsProcessTrusted() && !["open_app", "open_url"].contains(action) { return ["error": noPermission] }
   // Keys and clicks would land on the lock screen (typed text in its password field).
-  if screenLocked() { return ["error": lockedError] }
+  if screenLockedCached() { return ["error": lockedError] }
   let ref = r["ref"] as? String
   let t = ref.flatMap { live[$0] }
   let el = t?.el
@@ -561,15 +640,22 @@ func act(_ r: [String: Any]) -> [String: Any] {
   case "type":
     let text = r["text"] as? String ?? ""
     if ref != nil && el == nil { return ["error": "unknown ref"] }
+    // Insert at the caret through accessibility: no dependence on keyboard focus, and no input method in
+    // the way (a Pinyin IME turns typed letters into candidates). With a ref, that field is focused first.
+    // Without one, the text element that has focus in the observed app is used as it is (focusing a field
+    // again can select all its text). Line breaks typed into a one-line field submit it, which inserting
+    // them wouldn't, so such text goes through the keyboard. So do web pages: they take inserted text without
+    // firing input events, so a React/Vue form keeps its old state while showing the text, and the value check
+    // can't tell.
+    // A field that a shortcut has just opened may take focus only a little later (Finder's name field
+    // ~0.5 s after cmd+shift+n): typing before that lands in the file list, so wait briefly for one.
     if let el {
-      // Insert at the caret through accessibility: no dependence on keyboard focus.
       AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-      let before = attr(el, kAXValueAttribute) as? String
-      if AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString) == .success,
-         (attr(el, kAXValueAttribute) as? String) != before {
-        res["via"] = "ax"
-        break
-      }
+      if insertText(el, text) { res["via"] = "ax"; break }
+    } else if let f = focusedText() ?? { var g: (el: AXUIElement, role: String)?; waitFor(0.6) { g = focusedText(); return g != nil }; return g }(),
+              f.role == "AXTextArea" || !text.contains(where: { $0.isNewline || $0 == "\t" }),
+              !inWebArea(f.el), insertText(f.el, text) {
+      res["via"] = "ax"; break
     }
     focusTarget()
     res["via"] = "keyboard"
@@ -614,13 +700,14 @@ func act(_ r: [String: Any]) -> [String: Any] {
     let at = CGPoint(x: area.midX, y: area.midY)
     let saved = CGEvent(source: nil)?.location
     CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: at, mouseButton: .left)?.post(tap: .cghidEventTap)
-    usleep(15_000)
+    usleep(30_000)
     let wheel = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)
     wheel?.location = at  // routed by its own position, not wherever the cursor is when it's delivered
     wheel?.post(tap: .cghidEventTap)
-    // With its own position the wheel landed even with no wait at all (System Settings list, Safari page);
-    // a short one is left for apps that look at the live cursor position instead.
-    usleep(30_000)
+    // With its own position the wheel landed even with no wait at all (System Settings list, Safari page),
+    // but apps that look at the live cursor position would scroll wherever it is put back to: scrolls are
+    // rare, so keep a margin before restoring it (was 150 ms).
+    usleep(100_000)
     if let saved { CGWarpMouseCursorPosition(saved) }
   case "find_text":
     let found = findText(r["query"] as? String ?? "")
@@ -657,20 +744,37 @@ func act(_ r: [String: Any]) -> [String: Any] {
     for _ in 0..<40 { if let a = runningApp(name) { up = a; break }; Thread.sleep(forTimeInterval: 0.2) }
     guard let a = up else { return ["error": "\(name) was launched but is not running (it quit on start or is still loading); retry once with open_app, then report it"] }
     // Later keystrokes in the same batch must go to this app, not the one observed before: wait until it
-    // is in front with a window (an app that opens none gets the full 0.6 s).
-    waitFor(0.6) { isFrontmost(a) && frontWindow(a) != nil }
+    // is in front with a window (a fresh launch shows one only after a moment; an app that opens none gets
+    // 1.5 s). An app launched for a background process like this one may stay behind (Chess did), so bring
+    // it forward ourselves. Then wait until the on-screen window list shows it in front too: an observe
+    // without an app name goes by that list, and while it lags it would pick the previous app and bring
+    // that one back. At most 2 s in all.
+    let t0 = Date()
+    waitFor(1.5) { isFrontmost(a) && frontWindow(a) != nil || frontWindow(a) != nil && Date().timeIntervalSince(t0) > 0.3 }
     currentApp = a
     currentWindow = frontWindow(a)
+    bringForward()
+    if currentWindow != nil {
+      waitFor(max(0, 2 - Date().timeIntervalSince(t0))) { frontmostApp()?.processIdentifier == a.processIdentifier }
+    }
   case "open_url":
     guard let u = URL(string: r["url"] as? String ?? "") else { return ["error": "bad url"] }
-    // Wait until the app that handles the URL is in front and its window shows something new (a new tab or
-    // page title), at most the second this used to sleep, so the next read doesn't see the old screen.
+    // Wait until the app that handles the URL is in front, also in the on-screen window list (an observe
+    // without an app name goes by that list and would otherwise bring the previous app back), at most 1.5 s;
+    // then until its window shows something new (a new tab or page title), within the second this used to
+    // sleep, so the next read doesn't see the old screen.
     let handler = NSWorkspace.shared.urlForApplication(toOpen: u).flatMap { Bundle(url: $0)?.bundleIdentifier }
     let appNow = { handler.flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0).first } }
     let titleNow = { () -> String? in appNow().flatMap(frontWindow).flatMap { attr($0, kAXTitleAttribute) as? String } }
     let before = titleNow()
+    let t0 = Date()
     NSWorkspace.shared.open(u)
-    waitFor(1.0) { guard let a = appNow(), isFrontmost(a), let t = titleNow() else { return false }; return t != before }
+    if handler == nil { Thread.sleep(forTimeInterval: 1.0) }
+    waitFor(handler == nil ? 0 : 1.5) {
+      guard let a = appNow() else { return false }
+      return isFrontmost(a) && frontmostApp()?.processIdentifier == a.processIdentifier
+    }
+    waitFor(max(0, 1.0 - Date().timeIntervalSince(t0))) { titleNow().map { $0 != before } ?? false }
     // Later keystrokes in the same batch go to the browser, not the app observed before.
     if let a = appNow() { currentApp = a; currentWindow = frontWindow(a) }
   default: return ["error": "unknown action"]
@@ -845,6 +949,7 @@ AXUIElementSetMessagingTimeout(systemWide, 1.0)
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)  // no Dock icon, never steals focus
 Overlay.shared.setup()
+followScreenLock()
 
 Thread.detachNewThread {
   // Hosts built on Electron (DeepSeek Harness, VS Code...) set this for their child processes. Passed on
