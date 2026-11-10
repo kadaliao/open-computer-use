@@ -1,17 +1,21 @@
 // Action cache: "goal pattern -> actions that worked". A repeat task replays without calling any model.
 // Quoted strings and numbers in the goal become parameters, so "note 'abc'" also serves "note 'xyz'".
 // Element refs change between runs, so steps store the element's "Role label" and are resolved again on replay.
+// A run that ended with done{expect} also keeps its summary and expect: a replay that brings the expected text
+// on screen finishes without asking the planner.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { Observation } from "./driver.ts";
+import type { Expect } from "./policy.ts";
 
 const env = process.env;
-const FILE = env.OCU_CACHE_FILE ?? join(homedir(), ".cache", "ocu", "actions.json");
+const file = () => env.OCU_CACHE_FILE ?? join(homedir(), ".cache", "ocu", "actions.json");
 export const cacheEnabled = () => env.OCU_CACHE !== "0";
 
 export type CachedStep = { step: Record<string, any>; target?: string; nth?: number; spell?: number; prefix?: string };
-type Entry = { steps: CachedStep[]; hits: number; saved: string };
+export type CachedDone = { summary: string; expect: Expect };
+type Entry = { steps: CachedStep[]; done?: CachedDone; hits: number; saved: string };
 
 const PARAM = /"[^"]+"|'[^']+'|“[^”]+”|「[^」]+」|-?\d+(?:\.\d+)?/g;
 
@@ -38,35 +42,40 @@ const mapStrings = (o: Record<string, any>, f: (s: string) => string) =>
   Object.fromEntries(Object.entries(o).map(([k, v]) => [k, typeof v === "string" && k !== "action" && k !== "ref" ? f(v) : Array.isArray(v) ? v.map((x) => (typeof x === "string" ? f(x) : x)) : v]));
 
 function load(): Record<string, Entry> {
-  try { return JSON.parse(readFileSync(FILE, "utf8")); } catch { return {}; }
+  try { return JSON.parse(readFileSync(file(), "utf8")); } catch { return {}; }
 }
 function save(db: Record<string, Entry>) {
-  mkdirSync(dirname(FILE), { recursive: true });
-  writeFileSync(FILE, JSON.stringify(db, null, 1));
+  mkdirSync(dirname(file()), { recursive: true });
+  writeFileSync(file(), JSON.stringify(db, null, 1));
 }
+const mapExpect = (x: Expect, f: (s: string) => string): Expect => (Array.isArray(x) ? x.map(f) : f(x));
 
-/** Steps for this goal with parameters filled in, or null. */
-export function lookup(goal: string): CachedStep[] | null {
-  if (!cacheEnabled() || !existsSync(FILE)) return null;
+/** Steps for this goal with parameters filled in (plus the recorded done, if any), or null. */
+export function lookup(goal: string): { steps: CachedStep[]; done?: CachedDone } | null {
+  if (!cacheEnabled() || !existsSync(file())) return null;
   const { key, params } = pattern(goal);
   const e = load()[key];
   if (!e) return null;
-  return e.steps.flatMap((s): CachedStep[] =>
+  const steps = e.steps.flatMap((s): CachedStep[] =>
     s.spell !== undefined
       ? [...(params[s.spell] ?? "")].map((ch) => ({ step: { action: "press" }, target: `${s.prefix}${ch}`, nth: 0 }))
       : [{ ...s, step: mapStrings(s.step, (x) => fill(x, params)), target: s.target && fill(s.target, params) }]);
+  const f = (x: string) => fill(x, params);
+  return { steps, ...(e.done ? { done: { summary: f(e.done.summary), expect: mapExpect(e.done.expect, f) } } : {}) };
 }
 
 // Reading steps produce answers that change from run to run; replaying them blindly would be wrong.
 const UNCACHEABLE = new Set(["read_visual", "find_text", "note"]);
 
 /** Remember a successful run. Steps that errored or were skipped are not passed in. */
-export function store(goal: string, steps: CachedStep[]) {
+export function store(goal: string, steps: CachedStep[], done?: CachedDone) {
   if (!cacheEnabled() || !steps.length || steps.some((s) => UNCACHEABLE.has(s.step.action))) return;
   const { key, params } = pattern(goal);
   const db = load();
+  const t = (x: string) => templ(x, params);
   db[key] = {
-    steps: spell(steps, params).map((s) => ({ ...s, step: mapStrings(s.step, (x) => templ(x, params)), target: s.target && templ(s.target, params) })),
+    steps: spell(steps, params).map((s) => ({ ...s, step: mapStrings(s.step, t), target: s.target && t(s.target) })),
+    ...(done ? { done: { summary: t(done.summary), expect: mapExpect(done.expect, t) } } : {}),
     hits: db[key]?.hits ?? 0, saved: new Date().toISOString(),
   };
   save(db);

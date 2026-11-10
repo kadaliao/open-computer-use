@@ -1,41 +1,121 @@
-import { MacDriver, render, type Observation } from "./driver.ts";
+import { MacDriver, render, type Element, type Observation } from "./driver.ts";
+import { decide as planDecide, type ActStep, type Expect, type Step } from "./policy.ts";
+import { ask, locate } from "./vision.ts";
+import * as cache from "./cache.ts";
 
-/** Re-read the UI until two reads in a row match (page loaded, window opened), up to maxMs. */
-async function settle(driver: MacDriver, maxMs = 2000): Promise<Observation> {
+/** What the loop needs from the helper. Callers that already run one (the MCP server) pass it in; tests pass a fake. */
+export type Driver = Pick<MacDriver, "observe" | "act" | "screenshot">;
+export type Decide = typeof planDecide;
+
+/** Waits in ms. Mutable so tests can shorten them. */
+export const timing = {
+  poll: 100,          // between reads while waiting for the screen to settle
+  quiet: 600,         // an unchanged screen means "the action did nothing" only after this long,
+  quietBrowser: 1200, // or this long in a browser, where page loads start late
+  maxSettle: 2000,
+  stepGap: 80,        // between the steps of a batch
+  turnGap: 100,       // before reading the screen after steps that change it only a little (typing)
+};
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const isBrowser = (app = "") => /safari|chrome|edge|firefox|arc|浏览器/i.test(app);
+
+/**
+ * Re-read the UI until it stops changing (page loaded, window opened), up to maxSettle.
+ * `before` is the screen the last action ran on: while the screen still equals it the action may just be slow to
+ * show, so "nothing changed" is accepted only after `quiet` ms. `enough` ends the wait early (expected text is up).
+ */
+export async function settle(driver: Driver, before?: string, enough?: (o: Observation) => boolean): Promise<Observation> {
   const t0 = performance.now();
-  let prev = await driver.observe();
-  while (performance.now() - t0 < maxMs) {
-    await new Promise((r) => setTimeout(r, 150));
+  let prev = await driver.observe(), stable = 0;
+  const quiet = isBrowser(prev.app) ? timing.quietBrowser : timing.quiet;
+  while (!enough?.(prev) && performance.now() - t0 < timing.maxSettle) {
+    const moved = before === undefined || render(prev) !== before;
+    if (moved ? stable >= 1 : stable >= 2 && performance.now() - t0 >= quiet) break;
+    await sleep(timing.poll);
     const cur = await driver.observe();
-    if (render(cur) === render(prev)) return cur;
+    stable = render(cur) === render(prev) ? stable + 1 : 0;
     prev = cur;
   }
   return prev;
 }
-import { decide, type ActStep, type Step } from "./policy.ts";
-import { ask, locate } from "./vision.ts";
-import * as cache from "./cache.ts";
+
+// done{expect} is checked here instead of by another planner call. Text on these roles proves nothing:
+// controls name places you could go next, one-line fields echo what was typed into them.
+const NO_PROOF = new Set(["Button", "MenuItem", "MenuBarItem", "MenuButton", "Link", "Tab", "CheckBox", "RadioButton",
+  "PopUpButton", "Row", "Cell", "List", "Slider", "TextField", "SearchField", "ComboBox"]);
+// Case, width, line breaks and digit grouping ("6,912", "6 912" vs "6912") don't matter (NFKC turns no-break spaces into spaces).
+const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/(\d)[,' ](?=\d{3}(?!\d))/g, "$1").replace(/\s+/g, " ").trim();
+const textOf = (e: Element) => [e.label, (e as { value?: unknown }).value].filter((v) => typeof v === "string" && v).join(" ");
+const content = (o: Observation) => (o.elements ?? []).filter((e) => !NO_PROOF.has(e.role)).map((e) => norm(textOf(e)));
+
+/**
+ * Did the batch bring `expect` on screen? It must now be in the window title or in a content element, and must not
+ * have been in that place on any `seen` screen (the one the batch was planned on, and those read during it).
+ * Shorter than 2 characters is too easy to hit by chance.
+ */
+export function confirmed(expect: Expect | undefined, seen: Observation[], now: Observation): boolean {
+  if (!expect || now.error || !now.elements) return false;
+  const wants = (Array.isArray(expect) ? expect : [expect]).map((w) => norm(String(w))).filter((w) => w.length >= 2);
+  const title = norm(now.window ?? ""), body = content(now);
+  const titles = seen.map((o) => norm(o.window ?? "")), bodies = seen.flatMap(content);
+  return wants.some((w) => (title.includes(w) && !titles.some((t) => t.includes(w))) ||
+    (body.some((t) => t.includes(w)) && !bodies.some((t) => t.includes(w))));
+}
+
+// A goal that asks for an answer ("告诉我…", "what is…"): expect must be the answer, so it has to be in the summary and
+// must not be just words of the goal. A page or option the goal names says nothing about which answer is right.
+const ASKS = /告诉|是什么|是多少|多少|哪|[？?]|\b(tell|what|which|who|when|where|how many|how much)\b/i;
+export function proofOf(goal: string, done: { summary?: string; expect?: Expect }): string[] {
+  const all = (Array.isArray(done.expect) ? done.expect : done.expect ? [done.expect] : []).map(String);
+  if (!ASKS.test(goal)) return all;
+  const g = norm(goal), s = norm(done.summary ?? "");
+  return all.filter((w) => !g.includes(norm(w)) && s.includes(norm(w)));
+}
 
 const UI_CHANGERS = ["press", "menu", "open_app", "open_url", "click_visual"];
 const changesUI = (step: any) => UI_CHANGERS.includes(step.action) ||
   (step.action === "key" && (step.key.includes("+") || step.key === "return"));
+// After the screen changed, a batch goes on only with steps that don't point at an element of the old screen.
+const REFLESS = new Set(["key", "type", "menu", "open_app", "open_url", "find_text", "read_visual", "note", "done"]);
+const needsLook = (step: any) => typeof step.ref === "string" || !REFLESS.has(step.action);
 
-/** Replay cached steps. Returns how many ran; stops at the first element that can't be found or fails. */
-async function replay(driver: MacDriver, cached: cache.CachedStep[], history: string[], record: cache.CachedStep[], steps: StepLog[], log: (s: string) => void) {
-  let n = 0, needSettle = true;
+/**
+ * Per-step timing. ms is the step's share of the run, so sums over steps add up: the first step of a turn carries
+ * the turn's observe (incl. settling) and model time, every step its own wait (settling mid-batch, gaps) and action.
+ */
+export type StepLog = { tier: string; ms: number; step: object; target?: string; error?: string; via?: string;
+  obs_ms?: number; model_ms?: number; wait_ms?: number; act_ms?: number };
+const timed = (t: { obs_ms?: number; model_ms?: number; wait_ms?: number; act_ms?: number }) => {
+  const parts = Object.fromEntries(Object.entries(t).filter(([, v]) => v)) as typeof t;
+  return { ms: Object.values(parts).reduce((a, b) => a + b, 0), ...parts };
+};
+/** Where a run's time went, in ms. */
+export const totals = (steps: StepLog[]) => steps.reduce((a, s) => ({ obs: a.obs + (s.obs_ms ?? 0), model: a.model + (s.model_ms ?? 0),
+  wait: a.wait + (s.wait_ms ?? 0), act: a.act + (s.act_ms ?? 0) }), { obs: 0, model: 0, wait: 0, act: 0 });
+const fmtTime = (s: StepLog) => [s.obs_ms && `obs ${s.obs_ms}`, s.model_ms && `model ${s.model_ms}`, s.wait_ms && `wait ${s.wait_ms}`,
+  s.act_ms && `act ${s.act_ms}`].filter(Boolean).join(" + ") || "0";
+const clock = () => { let t = performance.now(); return () => { const n = performance.now(), d = Math.round(n - t); t = n; return d; }; };
+
+/** Replay cached steps. Returns how many ran (stops at the first element that can't be found or fails) and the screens read. */
+async function replay(driver: Driver, cached: cache.CachedStep[], history: string[], record: cache.CachedStep[], steps: StepLog[], log: (s: string) => void) {
+  let n = 0, needSettle = true, before: string | undefined;
+  const seen: Observation[] = [];
   for (const c of cached) {
-    const t0 = performance.now();
-    const obs = needSettle ? await settle(driver) : await driver.observe();
+    const lap = clock();
+    const obs = needSettle ? await settle(driver, before) : await driver.observe();
+    seen.push(obs);
+    const wait = lap();
     const step: any = { ...c.step };
     if (c.target) {
       const ref = cache.resolve(obs, c.target, c.nth);
       if (!ref) { log(`[cache] stop: "${c.target}" not on screen`); break; }
       step.ref = ref;
     }
+    before = render(obs);
     const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
-    const ms = Math.round(performance.now() - t0);
-    steps.push({ tier: "cache", ms, step, target: res.target, error: res.error, via: res.via });
-    log(`[cache] ${ms}ms ${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}`);
+    const s: StepLog = { tier: "cache", ...timed({ wait_ms: wait, act_ms: lap() }), step, target: res.target, error: res.error, via: res.via };
+    steps.push(s);
+    log(`[cache] ${fmtTime(s)}ms ${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}`);
     if (res.error) break;
     history.push(`${JSON.stringify(step)} -> ok`);
     record.push(c);
@@ -43,11 +123,11 @@ async function replay(driver: MacDriver, cached: cache.CachedStep[], history: st
     needSettle = changesUI(step) && !(step.action === "press" && cached[n + 1]?.step.action === "press");
     n++;
   }
-  return n;
+  return { n, seen, before };
 }
 
 /** Screenshot fallback actions run here; everything else goes straight to the driver. */
-async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
+async function perform(driver: Driver, step: Step): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
   if (step.action === "click_visual") {
     const shot = await driver.screenshot();
     if (shot.error) return { error: shot.error };
@@ -65,51 +145,112 @@ async function perform(driver: MacDriver, step: Step): Promise<{ ok?: boolean; e
   return driver.act(step as ActStep);
 }
 
-export type StepLog = { tier: string; ms: number; step: object; target?: string; error?: string; via?: string };
-
-export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s: string) => void; noCache?: boolean } = {}) {
+export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s: string) => void; noCache?: boolean;
+    driver?: Driver; decide?: Decide } = {}) {
   const steps: StepLog[] = [];
   const log = opts.log ?? (() => {});
-  const driver = new MacDriver();
+  const own = opts.driver ? undefined : new MacDriver();
+  const driver: Driver = opts.driver ?? own!;
+  const decide = opts.decide ?? planDecide;
   const history: string[] = [];
-  let needSettle = false;
+  let turns = 0;                           // planner round trips
   let lastAct = { key: "", screen: "" };  // last action and the screen it ran on
   const record: cache.CachedStep[] = [];   // successful steps, for the cache
   let cacheable = true;
   let replayedAll = false;
-  let needSettleInit = false;
-  if (!opts.noCache) cache.setStartApp((await driver.observe()).app);
-  const cached = opts.noCache ? null : cache.lookup(goal);
-  const finish = (ok: boolean, summary: string) => {
+  let cached: ReturnType<typeof cache.lookup> = null;
+  const finish = (ok: boolean, summary: string, expect?: Expect) => {
     const fixedUp = steps.filter((s) => s.tier !== "cache").length > 1;  // the planner had to act after replay
     if (ok && cached && replayedAll && !fixedUp) cache.hit(goal);
     else if (cached) cache.forget(goal);  // the recording didn't fit this goal; the next run records afresh
-    else if (ok && cacheable) cache.store(goal, record);
-    return { ok, summary, steps };
+    else if (ok && cacheable) cache.store(goal, record, expect ? { summary, expect } : undefined);
+    return { ok, summary, steps, turns };
   };
   try {
+    const lap = clock();
+    const start = await driver.observe();
+    let firstObs = lap();
+    let obs: Observation | undefined = start;  // the screen to plan on next, when already read
+    let needSettle = false;
+    let before: string | undefined;  // the screen the last screen-changing action ran on
+    if (!opts.noCache) cache.setStartApp(start.app);
+    cached = opts.noCache ? null : cache.lookup(goal);
     if (cached) {
-      const n = await replay(driver, cached, history, record, steps, log);
-      replayedAll = n === cached.length;
+      const r = await replay(driver, cached.steps, history, record, steps, log);
+      replayedAll = r.n === cached.steps.length;
+      obs = undefined; needSettle = true; before = r.before;
+      // The recorded run ended with done{expect}: if the replay brought that text up, it is done without a model call.
+      const done = cached.done, proof = done ? proofOf(goal, done) : [];
+      if (replayedAll && done && proof.length) {
+        lap();
+        const seen = [start, ...r.seen];
+        obs = await settle(driver, before, (o) => confirmed(proof, seen, o));
+        needSettle = false;
+        const ok = confirmed(proof, seen, obs);
+        steps.push({ tier: "cache", ...timed({ wait_ms: lap() }), step: { action: "done", summary: done.summary, expect: done.expect }, ...(ok ? {} : { error: "not confirmed" }) });
+        if (ok) { log(`done (cache, ${JSON.stringify(done.expect)} on screen): ${done.summary}`); return finish(true, done.summary); }
+      }
       history.push(replayedAll ? "(the steps above were replayed from a previous successful run: check the screen and reply done if the goal is achieved)"
         : "(a previous run's steps were replayed up to here; continue from the current screen)");
-      needSettleInit = true;
     }
-    needSettle = needSettleInit;
     for (let i = 0; i < (opts.maxSteps ?? 25); i++) {
-      const t0 = performance.now();
-      const obs = needSettle ? await settle(driver) : await driver.observe();
-      needSettle = false;
-      const screen = render(obs);
-      const { steps: batch, tier } = await decide(goal, history, obs);
-      const ms = Math.round(performance.now() - t0);
+      const lap = clock();
+      if (!obs) {
+        if (!needSettle && i > 0) await sleep(timing.turnGap);
+        obs = needSettle ? await settle(driver, before) : await driver.observe();
+      }
+      const plan = obs;
+      obs = undefined; needSettle = false; before = undefined;
+      const screen = render(plan);
+      let pending: { obs_ms?: number; model_ms?: number } = { obs_ms: lap() + firstObs };
+      firstObs = 0;
+      const { steps: batch, tier } = await decide(goal, history, plan);
+      turns++;
+      pending.model_ms = lap();
+      // The first step logged this turn carries the turn's observe and model time.
+      const push = (s: Omit<StepLog, "ms" | "tier">, t: { wait_ms?: number; act_ms?: number }) => {
+        const entry: StepLog = { tier, ...timed({ ...pending, ...t }), ...s };
+        pending = {};
+        steps.push(entry);
+        return entry;
+      };
+      const seen = [plan];  // screens read during this batch, for the done{expect} check
+      let cur = plan;       // the latest of them
+      let refsOk = true;    // refs from `plan` still point where the planner thinks
+      let unsettled = false; // the screen changed since `cur` was read
+      // A step may run on the screen it was planned on, or, if it needs no ref, on the settled new one.
+      const blocked = (step: Step) => needsLook(step) && !refsOk;
+      const settling = (step: Step) => unsettled && step.action !== "done" && !needsLook(step);
       for (const [k, step] of batch.entries()) {
-        // "done" only counts right after looking at the screen, never at the end of a blind batch.
-        if (step.action === "done" && k > 0) break;
+        if (k > 0 && blocked(step)) break;  // it needs the new screen: the planner looks first
+        if (settling(step)) { cur = await settle(driver, before); seen.push(cur); unsettled = false; }
+        const wait = lap();  // the gap after the previous step, and settling
         if (step.action === "done") {
-          steps.push({ tier, ms, step });
-          log(`done (${tier}, ${ms}ms): ${step.summary}`);
-          return finish(true, step.summary);
+          // Right after looking at the screen, the planner's word is enough.
+          const proof = proofOf(goal, step);
+          if (k === 0) {
+            const s = push({ step }, {});
+            log(`done (${tier}, ${fmtTime(s)}ms): ${step.summary}`);
+            return finish(true, step.summary, proof.length ? proof : undefined);
+          }
+          // At the end of a blind batch it counts only with an expected text that the batch brought on screen.
+          if (!step.expect) break;
+          if (!proof.length) {
+            push({ step, error: "not accepted" }, { wait_ms: wait });
+            history.push(`{"action":"done","expect":${JSON.stringify(step.expect)}} -> not accepted: the goal asks for an answer you have not read yet. Read it on the screen, then reply done`);
+            log(`[${i}] done not accepted: expect ${JSON.stringify(step.expect)} is not an answer`);
+            break;
+          }
+          const now = await settle(driver, unsettled ? before : undefined, (o) => confirmed(proof, seen, o));
+          const ok = confirmed(proof, seen, now);
+          const s = push({ step, ...(ok ? {} : { error: "not confirmed" }) }, { wait_ms: wait + lap() });
+          if (ok) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
+          history.push(`{"action":"done","expect":${JSON.stringify(step.expect)}} -> not confirmed: that text did not newly appear on screen. ` +
+            `Check the screen: continue, or reply done (no expect needed) if the goal is achieved`);
+          log(`[${i}] done not confirmed: ${JSON.stringify(step.expect)} not new on screen`);
+          obs = now;  // just read and settled: plan on it
+          unsettled = false;
+          break;
         }
         // Same action on an unchanged screen already did nothing once: don't repeat it.
         const key = JSON.stringify(step);
@@ -118,41 +259,46 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         const pingPong = recent.length === 5 && new Set(recent).size === 2 && recent[0] === recent[2] && recent[2] === recent[4] && recent[1] === key.split(" ")[0];
         if (pingPong) {
           history.push(`${key} -> skipped: you are alternating between the same two actions; record what you need with note, then do the remaining work`);
-          log(`[${i}] ${tier} ${ms}ms ${key} -> skipped (ping-pong)`);
+          const s = push({ step, error: "skipped (ping-pong)" }, { wait_ms: wait });
+          log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> skipped (ping-pong)`);
           break;
         }
         if (k === 0 && key === lastAct.key && screen === lastAct.screen) {
           history.push(`${key} -> skipped: it had no visible effect last time; choose a different action or approach`);
-          log(`[${i}] ${tier} ${ms}ms ${key} -> skipped (no effect last time)`);
+          const s = push({ step, error: "skipped (no effect last time)" }, { wait_ms: wait });
+          log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> skipped (no effect last time)`);
           break;
         }
         if (k === 0) lastAct = { key, screen };
+        const ranOn = render(cur);
         const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
-        steps.push({ tier, ms, step, target: res.target, error: res.error, via: res.via });
+        const s = push({ step, target: res.target, error: res.error, via: res.via }, { wait_ms: wait, act_ms: lap() });
         if (!res.error) {
+          // Refs are only valid on `plan`; a ref step never runs on another screen (see needsLook).
           const ref = (step as any).ref;
-          const at = ref ? cache.nthOf(obs, ref) : null;
+          const at = ref ? cache.nthOf(plan, ref) : null;
           if (ref && !at) cacheable = false;
           else if (step.action !== "note") record.push({ step: Object.fromEntries(Object.entries(step).filter(([k]) => k !== "ref")), ...(at ?? {}) });
           if (["read_visual", "find_text", "note"].includes(step.action)) cacheable = false;
         }
-        const line = `${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;
+        const line = `${key}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;
         // Nudge the planner out of loops: same action 3 times in a row.
-        const repeats = history.slice(-2).filter((h) => h.startsWith(JSON.stringify(step))).length;
+        const repeats = history.slice(-2).filter((h) => h.startsWith(key)).length;
         history.push(repeats === 2 ? `${line} (repeated 3 times with no progress - try a different approach)` : line);
-        log(`[${i}] ${tier} ${ms}ms ${line}`);
+        log(`[${i}] ${tier} ${fmtTime(s)}ms ${line}`);
         if (res.error) break;
-        // These change the UI, so later actions in the batch would act on a stale screen: re-observe.
         if (step.action === "read_visual" || step.action === "find_text") break; // the planner needs the answer
-        const uiChanged = changesUI(step);
-        if (uiChanged) needSettle = true;
-        // Consecutive presses are fine (a Jev sequence or calculator keys); anything else re-observes.
-        if (uiChanged && k < batch.length - 1 &&
-            !(step.action === "press" && batch[k + 1]?.action === "press")) break;
-        if (batch.length > 1) await new Promise((r) => setTimeout(r, 80));
+        if (changesUI(step)) {
+          unsettled = true; before = ranOn;
+          // Consecutive presses (calculator keys, a Jev sequence) keep using the refs they were planned with.
+          refsOk = refsOk && step.action === "press" && batch[k + 1]?.action === "press";
+        }
+        // A short gap before the next step, unless it waits for the screen anyway or won't run.
+        const next = batch[k + 1];
+        if (next && next.action !== "done" && !blocked(next) && !settling(next) && timing.stepGap) await sleep(timing.stepGap);
       }
-      if (!needSettle) await new Promise((r) => setTimeout(r, 100));
+      if (unsettled) needSettle = true;
     }
     return finish(false, "max steps reached");
-  } finally { driver.close(); }
+  } finally { own?.close(); }
 }

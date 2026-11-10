@@ -2,32 +2,62 @@
 import type { Action, Observation } from "./driver.ts";
 import { render } from "./driver.ts";
 
-export type Step = Action | { action: "done"; summary: string } | { action: "note"; text: string }
+/** done.expect: text that shows up on screen once the goal is achieved (any of them, for a list). */
+export type Expect = string | string[];
+export type Step = Action | { action: "done"; summary: string; expect?: Expect } | { action: "note"; text: string }
   | { action: "click_visual"; target: string } | { action: "read_visual"; question: string };
 export type ActStep = Exclude<Step, { action: "done" } | { action: "note" } | { action: "click_visual" } | { action: "read_visual" }>;
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 const env = process.env;
-const SYSTEM = `You operate a macOS computer through its accessibility tree.
-Each turn you see the goal, history and the current interactive elements (ref role "label").
-Reply with JSON action objects only, one per line. Send several in a row when you can do them without
-looking at the screen in between (e.g. pressing calculator keys, or set_value then key return); otherwise send one.
+// How element state appears in the list (driver.ts renderElement). Kept apart so it can follow that format.
+const STATE = `After the label an element may show its state: [checked] (checkbox or menu item that is on), [mixed], [selected]
+(the chosen radio button, tab, row or cell), [disabled], and = "..." (current value of a field, pop-up button or slider).
+A checkbox without [checked] is off, a radio button without [selected] is not chosen. Read state from this list, not with read_visual.`;
+// What a batch may contain. The loop in agent.ts enforces the same rules: keep the two in step.
+const BATCH = `Send in one reply every step you can already predict, one JSON object per line. They run in order:
+- Steps with a ref act on the screen you were shown.
+- After a step that changes the screen (press, menu, open_app, open_url, a key combo or return), the batch waits for
+  the screen to settle and goes on only with steps that need no ref: key, type without ref, menu, open_app, open_url,
+  find_text, read_visual, note, done. The first step that needs a ref ends the batch; you then see the new screen.
+  A run of presses (calculator keys) is the exception: it keeps the refs you were shown.`;
+const DONE = `Finishing: {"action":"done","summary":"...","expect":"..."}; summary is one short sentence with any answer the goal asks for.
+done means every part of the goal is achieved ("open X, then do Y" is done after Y, not after X).
+A reply that stops before the goal is achieved simply ends without done: you then see the new screen.
+- As the first step of a reply, done means the screen you see shows the goal achieved; never assume.
+- After other steps, add done only if they finish the whole goal and you already know any answer it asks for. Give
+  expect: a short text that will appear on screen only if the steps worked. The task ends when it shows up in the
+  window title or in content where it was not before; otherwise you see the screen and continue. Text already on
+  screen, a page on the way, or what you type into a search, address or find field proves nothing.
+Examples:
+- calculator 12 × 34: the keys, then {"action":"done","summary":"12 × 34 = 408","expect":"408"}
+- a settings pane in the sidebar: press its row, then done with expect = the pane's name (the new window title)
+- a web page whose title you know: set_value the address field, key return, then done with expect = that title
+- a new note or document: press "New" (or key cmd+n), type without ref (it goes to the focused field), then done
+  with expect = its first words
+- a page two levels down, or "open a page, then click something on it": do the first part and end the reply,
+  because the next press needs refs from the new screen
+- a question about the screen ("which option is selected?"): open the page and end the reply; answer next turn
+- formatting (bold, a checkbox): do it and end the reply; check the screen, then done`;
+export const SYSTEM = `You operate a macOS computer through its accessibility tree.
+Each turn you see the goal, history and the current elements, one per line: ref Role "label".
+${STATE}
+${BATCH}
 Actions:
-{"action":"press","ref":"e3"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"..."}
+{"action":"press","ref":"e3"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"...","ref":"e2"}
 {"action":"key","key":"return"} (keys: return tab escape space delete up down left right, combos like "cmd+n", "cmd+shift+left")
 {"action":"menu","path":["前往","下载"]} (click a menu-bar menu item by its titles; MenuBarItem elements list the top menus)
 {"action":"open_app","name":"Notes"} {"action":"open_url","url":"https://..."}
 {"action":"click_visual","target":"the blue Send button at the bottom right"} (screenshot + vision model; use only when the element is missing from the list)
-{"action":"read_visual","question":"What does the chat window say?"} (screenshot + vision model; the answer appears in history)
+{"action":"read_visual","question":"What does the chat window say?"} (screenshot + vision model, takes seconds; the answer appears in history)
 {"action":"find_text","query":"Born"} (search ALL text in the window, including what the list above cut off; results appear in history)
 {"action":"note","text":"page title is Example Domain"} (remember a fact you will need later, e.g. before switching apps)
+${DONE}
 Calculators apply operator precedence and have no parentheses: press = to get intermediate results first.
-The element list is truncated on long pages: to read specific content, use find_text first, then read_visual.
+The element list is truncated on long pages: to read specific content, use find_text first; read_visual only for what neither shows.
 In Safari, if find_text misses text a page should have (e.g. a Wikipedia infobox), Reader mode is probably on and hides it: {"action":"menu","path":["显示","隐藏阅读器"]} (English: View > Hide Reader), then search again.
-{"action":"done","summary":"..."}
-Rules: "type" inserts text; always pass the "ref" of the target text field/area when you can.
-Only reply done when the current screen shows the result (e.g. the typed text is visible in a field's label); never assume. Elements with role Text are read-only context.
-Prefer the menu action over guessing keyboard shortcuts. If an action had no visible effect, do not repeat it; try another way. Reply done as soon as the goal is visibly achieved; put any answer the goal asks for in summary.`;
+Rules: "type" inserts text; pass the "ref" of the target text field/area when it is on your screen. Elements with role Text are read-only context.
+Prefer the menu action over guessing keyboard shortcuts. If an action had no visible effect, do not repeat it; try another way. Reply done as soon as the goal is visibly achieved.`;
 
 // Tier 1: optional fast decision model (e.g. a Jev server). Expected to return {step, confidence}.
 async function fastPath(goal: string, history: string[], obs: Observation, signal?: AbortSignal): Promise<Step[] | null> {
@@ -151,8 +181,8 @@ async function jevDone(goal: string, history: string[], obs: Observation, signal
 
 // Each turn the planner and the Jev judges start together.
 // - Jev press mode (OCU_JEV_PRESS=1): a confident Jev press wins unless the planner lands within a short grace.
-// - Jev done check: if Jev is confident the goal is met and the planner wants to keep acting,
-//   ask the planner once more with that hint, so it wraps up instead of wandering.
+// - Jev done check: if Jev is confident the goal is met and the planner wants to keep acting (without finishing in
+//   this batch), ask the planner once more with that hint, so it wraps up instead of wandering.
 //   The judge runs alongside the planner; once the planner has answered it gets only DONE_WAIT_MS more,
 //   so a slow judge can't add seconds to every turn.
 const GRACE_MS = Number(env.OCU_PLANNER_GRACE_MS ?? 400);
@@ -177,7 +207,8 @@ export async function decide(goal: string, history: string[], obs: Observation):
   }
 
   const steps = await plan;
-  if (steps[0]?.action === "done") { ctl.abort(); return { steps, tier: "planner" }; }
+  // The planner means to finish in this batch (done now, or done{expect} that agent.ts checks after the steps).
+  if (steps.some((s) => s.action === "done")) { ctl.abort(); return { steps, tier: "planner" }; }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const pDone = await Promise.race([doneP, new Promise<number>((r) => { timer = setTimeout(() => r(0), DONE_WAIT_MS); })]);
   clearTimeout(timer);

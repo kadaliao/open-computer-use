@@ -21,7 +21,7 @@ for (const t of tasks.filter(pick)) {
   const t0 = performance.now();
   let r: Awaited<ReturnType<typeof runTask>>;
   try { r = await runTask(t.goal, { maxSteps: t.hard ? 30 : 15, log: (s) => console.log(`  ${s}`) }); }
-  catch (e) { r = { ok: false, summary: String(e), steps: [] }; }
+  catch (e) { r = { ok: false, summary: String(e), steps: [], turns: 0 }; }
   const total = Math.round(performance.now() - t0);
   await Bun.sleep(500);
   let pass = r.ok;
