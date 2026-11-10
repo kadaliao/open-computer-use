@@ -22,7 +22,9 @@ const BATCH = `Send in one reply every step you can already predict, one JSON ob
   the screen to settle, then goes on with steps that need no ref (key, type without ref, menu, open_app, open_url,
   find_text, read_visual, note, done) and with steps whose element is still there unchanged after a small change
   (select all, then press Bold). Any other step with a ref ends the batch; you then see the new screen.
-  A run of presses (calculator keys) goes straight on with the refs you were shown.`;
+  A run of presses (calculator keys) goes straight on with the refs you were shown.
+- Don't guess the layout of a panel, bar or dialog you have not seen yet (which field tab reaches, what return does
+  there): open it and end the reply.`;
 const DONE = `Finishing: {"action":"done","summary":"...","expect":"..."}; summary is one short sentence with any answer the goal asks for.
 done means every part of the goal is achieved ("open X, then do Y" / "打开 X，再进入 Y" is done after Y, not after X).
 A reply that stops before the goal is achieved simply ends without done: you then see the new screen.
