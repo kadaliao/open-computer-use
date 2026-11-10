@@ -17,7 +17,7 @@ export type Observation = { app: string; window: string; window_id?: number; ele
 export type Action =
   | { action: "press"; ref: string; extend?: boolean }
   | { action: "set_value"; ref: string; text: string }
-  | { action: "type"; text: string }
+  | { action: "type"; text: string; ref?: string }
   | { action: "key"; key: string; repeat?: number }
   | { action: "scroll"; ref?: string; direction?: "up" | "down"; amount?: number }
   | { action: "open_app"; name: string }
@@ -64,8 +64,12 @@ export class MacDriver {
     });
   }
   trusted(): Promise<boolean> { return this.call({ cmd: "trust" }, 5000).then((r) => !!r.trusted); }
-  observe(app?: string): Promise<Observation> { return this.call({ cmd: "observe", ...(app ? { app } : {}) }); }
-  screenshot(): Promise<Shot> { return this.call({ cmd: "screenshot" }); }
+  /** quiet: a repeat read while waiting for the screen to settle (no raising, no glow). */
+  observe(app?: string, opts: { quiet?: boolean } = {}): Promise<Observation> {
+    return this.call({ cmd: "observe", ...(app ? { app } : {}), ...(opts.quiet ? { quiet: true } : {}) });
+  }
+  /** max: longest side of the image in pixels (the helper only shrinks). */
+  screenshot(max?: number): Promise<Shot> { return this.call({ cmd: "screenshot", ...(max ? { max } : {}) }); }
   act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> { return this.call({ cmd: "act", ...a }); }
   close() { this.dead ??= "closed"; this.proc.removeAllListeners("exit"); this.proc.kill(); }
 }
@@ -74,12 +78,16 @@ export class MacDriver {
 export const renderElement = (e: Element) =>
   `${e.ref} ${e.role} "${e.label}"${e.value !== undefined ? ` = "${e.value}"` : ""}${e.state?.length ? ` [${e.state.join(", ")}]` : ""}`;
 
-// Compact text form of the UI: one line per interactive element, cheap for text-only models.
-export const render = (o: Observation) => {
-  if (o.error || !o.elements) return `error: ${o.error ?? JSON.stringify(o)}`;
+/** The lines above the element list: app and window, the app's other windows, a note when the list is sparse. */
+export const renderHead = (o: Observation) => {
   const labeled = o.elements.filter((e) => e.label).length;
   const sparse = labeled < 5 ? "\n(accessibility info is sparse here: use click_visual / read_visual)" : "";
   const n = o.others?.length ?? 0;
   const others = n ? `\nother windows of this app (${n}): ${o.others!.slice(0, 8).map((t) => `"${t}"`).join(", ")}${n > 8 ? ", ..." : ""}` : "";
-  return `app: ${o.app} | window: ${o.window}${others}${sparse}\n` + o.elements.map(renderElement).join("\n");
+  return `app: ${o.app} | window: ${o.window}${others}${sparse}`;
+};
+// Compact text form of the UI: one line per interactive element, cheap for text-only models.
+export const render = (o: Observation) => {
+  if (o.error || !o.elements) return `error: ${o.error ?? JSON.stringify(o)}`;
+  return `${renderHead(o)}\n` + o.elements.map(renderElement).join("\n");
 };
