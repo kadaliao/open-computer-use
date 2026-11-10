@@ -12,8 +12,12 @@ import type { Shot } from "./vision.ts";
  * state: any of "checked", "mixed", "selected", "disabled" (absent = unchecked / unselected / enabled).
  */
 export type Element = { ref: string; role: string; label: string; f?: [number, number, number, number]; value?: string; state?: string[] };
-/** window_id: the stable number of the observed window, so two windows with the same title can be told apart. */
-export type Observation = { app: string; window: string; window_id?: number; elements: Element[]; others?: string[]; error?: string };
+/**
+ * window_id: the stable number of the observed window, so two windows with the same title can be told apart.
+ * sheet: set while a sheet, dialog or alert is up in (or as) the observed window: its title or first text, or "".
+ * Its controls come first in `elements`.
+ */
+export type Observation = { app: string; window: string; window_id?: number; sheet?: string; elements: Element[]; others?: string[]; error?: string };
 export type Action =
   | { action: "press"; ref: string; extend?: boolean }
   | { action: "set_value"; ref: string; text: string }
@@ -84,7 +88,8 @@ export const renderHead = (o: Observation) => {
   const sparse = labeled < 5 ? "\n(accessibility info is sparse here: use click_visual / read_visual)" : "";
   const n = o.others?.length ?? 0;
   const others = n ? `\nother windows of this app (${n}): ${o.others!.slice(0, 8).map((t) => `"${t}"`).join(", ")}${n > 8 ? ", ..." : ""}` : "";
-  return `app: ${o.app} | window: ${o.window}${others}${sparse}`;
+  const sheet = o.sheet !== undefined ? `\ndialog open${o.sheet ? `: "${o.sheet}"` : ""} (its controls are listed first)` : "";
+  return `app: ${o.app} | window: ${o.window}${sheet}${others}${sparse}`;
 };
 // Compact text form of the UI: one line per interactive element, cheap for text-only models.
 export const render = (o: Observation) => {

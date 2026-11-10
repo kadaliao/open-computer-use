@@ -51,6 +51,8 @@ export function has(text: string, want: string): boolean {
   return false;
 }
 
+/** A sheet, dialog or alert is up now that wasn't when the batch started ("Replace it?", "Couldn't save"). */
+const dialogCame = (start: Observation | undefined, now: Observation) => now.sheet !== undefined && now.sheet !== start?.sheet;
 /** What the batch typed or set (type / set_value texts), and whether that was its last action. */
 export type Typed = { texts: string[]; last: boolean };
 /**
@@ -59,13 +61,15 @@ export type Typed = { texts: string[]; last: boolean };
  * Text the batch typed itself shows up wherever it went: in an error ("“report.rtf” already exists", "No results for
  * …", "can't find the server “…”") or in the wrong document. So an expect that overlaps typed text counts only when the
  * typing was the batch's last action and a text area now holds exactly that text, which it didn't before.
- * A window that appeared at the end of the batch (an alert, another document) always sends the turn to the planner.
+ * A window or dialog that appeared during the batch (an alert, a sheet, another document) always sends the turn to
+ * the planner.
  * Shorter than 2 characters is too easy to hit by chance.
  */
 export function confirmed(expect: Expect | undefined, seen: Observation[], now: Observation, typed: Typed = { texts: [], last: false }): boolean {
   if (!expect || now.error || !now.elements) return false;
   const last = seen.at(-1);
   if (last && (last.app !== now.app || (last.window_id !== undefined && now.window_id !== undefined && last.window_id !== now.window_id))) return false;
+  if (dialogCame(seen[0], now)) return false;
   const wants = (Array.isArray(expect) ? expect : [expect]).map((w) => norm(String(w))).filter((w) => w.length >= 2);
   const title = norm(now.window ?? ""), body = content(now);
   const titles = seen.map((o) => norm(o.window ?? "")), bodies = seen.flatMap(content);
@@ -118,13 +122,13 @@ const REFLESS = new Set(["key", "type", "menu", "open_app", "open_url", "find_te
 const needsLook = (step: any) => typeof step.ref === "string" || !REFLESS.has(step.action);
 /**
  * Refs are stable, so a step planned on `plan` can still run on `now` when its element is there with the same
- * role and label, in the same window, and the screen changed little (select all, then press Bold). A dialog or
- * another page is a big change: then the planner looks first.
+ * role and label, in the same window, no dialog came or went, and the screen changed little (select all, then press
+ * Bold). Behind a new sheet the element may still be listed but must wait: then the planner looks first.
  */
 function kept(step: any, plan: Observation, now: Observation): boolean {
   if (typeof step.ref !== "string" || now.error || !now.elements) return false;
   const a = plan.elements.find((e) => e.ref === step.ref), b = now.elements.find((e) => e.ref === step.ref);
-  return !!a && !!b && a.role === b.role && a.label === b.label && !bigChange(changes(plan, now), now);
+  return !!a && !!b && a.role === b.role && a.label === b.label && now.sheet === plan.sheet && !bigChange(changes(plan, now), now);
 }
 
 /**
@@ -332,6 +336,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
           const s = push({ step, ...(ok && !claim ? {} : { error: claim ? "not accepted" : "not confirmed" }) }, { wait_ms: wait + lap() });
           if (ok && !claim) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
           if (claim) say(`${done} -> not accepted: your summary says "${claim}", which is not on the screen. Check the screen, then reply done with what it shows`);
+          else if (dialogCame(plan, now)) say(`${done} -> not confirmed: a dialog came up${now.sheet ? ` ("${now.sheet}")` : ""}. Deal with it first, then reply done when the goal is achieved`);
           else say(`${done} -> not confirmed: that text did not newly appear on screen (or it only echoes what you typed, or a new window came up). ` +
             `Check the screen: continue, or reply done (no expect needed) if the goal is achieved`);
           log(`[${i}] done not ${claim ? `accepted: unseen "${claim}"` : `confirmed: ${JSON.stringify(step.expect)} not new on screen`}`);

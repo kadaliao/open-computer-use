@@ -13,7 +13,8 @@ const env = process.env;
 // How element state appears in the list (driver.ts renderElement). Kept apart so it can follow that format.
 const STATE = `After the label an element may show its state: [checked] (checkbox or menu item that is on), [mixed], [selected]
 (the chosen radio button, tab, row or cell), [disabled], and = "..." (current value of a field, pop-up button or slider).
-A checkbox without [checked] is off, a radio button without [selected] is not chosen. Read state from this list, not with read_visual.`;
+A checkbox without [checked] is off, a radio button without [selected] is not chosen. Read state from this list, not with read_visual.
+A "dialog open" line under the window means a sheet or alert is up; its controls come first: deal with it before the rest.`;
 // What a batch may contain. The loop in agent.ts enforces the same rules: keep the two in step.
 const BATCH = `Send in one reply every step you can already predict, one JSON object per line. They run in order:
 - Steps with a ref act on the screen you were shown. Refs are stable: an element keeps its ref while it is on screen.

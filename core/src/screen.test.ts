@@ -77,6 +77,22 @@ group("act replies", () => {
     expect(describe(scr(renumber(keypad(), 100)), scr(renumber(changed, 200))).kind).toBe("full");
   });
 
+  test("a dialog opening or closing is said first, with the full screen", () => {
+    const doc = [el("e3", "TextArea", "hello"), ...keypad()];
+    const up = scr([el("e40", "Text", "“a.rtf”已存在。要替换它吗？"), el("e41", "Button", "替换"), ...doc], "未命名", 7, "文本编辑");
+    up.sheet = "“a.rtf”已存在。要替换它吗？";
+    const r = describe(scr(doc, "未命名", 7, "文本编辑"), up);
+    expect(r.kind).toBe("full");
+    expect(r.text).toStartWith('changed: a dialog is up: "“a.rtf”已存在。要替换它吗？". Its controls are listed first');
+    expect(r.text).toContain('dialog open: "“a.rtf”已存在。要替换它吗？" (its controls are listed first)');  // in the header too
+    expect(r.text).toContain('e41 Button "替换"');
+    const closed = describe(up, scr(doc, "未命名", 7, "文本编辑"));
+    expect(closed.text).toStartWith("changed: the dialog closed.");
+    const same = scr([el("e40", "Text", "x"), el("e41", "Button", "替换"), ...doc], "未命名", 7, "文本编辑");
+    same.sheet = "导出";
+    expect(describe({ ...same, elements: same.elements.slice(1) }, same).kind).toBe("diff");  // the same dialog, a small change
+  });
+
   test("first sight and errors are full", () => {
     expect(describe(undefined, scr(keypad())).kind).toBe("full");
     expect(describe({ app: "", window: "", elements: [], error: "the screen is locked" }, scr(keypad())).kind).toBe("full");

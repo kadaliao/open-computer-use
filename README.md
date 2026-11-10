@@ -14,6 +14,7 @@ One line per element: `ref Role "label"`, then the element's state and value whe
     e31 TextArea "hello"
 
 - State: `[checked]`, `[mixed]` (checkboxes, checked menu items), `[selected]` (chosen radio button, tab, row, cell), `[disabled]`. `= "..."` is the current value of a titled field, pop-up button or slider.
+- A `dialog open: "…"` line under the window means a sheet or alert is up; its controls come first in the list. An act reply says so when a dialog opens or closes, with the full screen, and the built-in agent never finishes on its own check while a new dialog is up.
 - Refs are stable: an element keeps its ref for as long as the helper runs, and a ref is never reused for another element. Only elements on the latest screen can be acted on; a ref that is gone answers `unknown ref`. (An app that creates new element objects on every read gets new refs every time; everything still works, replies are just full lists.)
 
 ## Build

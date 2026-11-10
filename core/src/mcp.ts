@@ -37,6 +37,7 @@ const INSTRUCTIONS = `Drive macOS apps through their accessibility tree. The loo
        - e2 Button "AC"                       gone: don't use e2 any more
    - otherwise the full screen (another window, a big change, and every few replies): use only refs in it.
    State follows the label: [checked], [selected], [mixed], [disabled]; = "..." is a field's current value.
+   A "dialog open" line under the window means a sheet or alert is up: its controls are listed first; deal with it first.
 3. Batch predictable steps with act{..., then:[...]} (e.g. typing a number on a keypad).
 Picking an action:
 - Text fields: set_value{ref,text} (or type{text,ref}); press return with key{key:"return"} if needed.

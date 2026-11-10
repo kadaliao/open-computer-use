@@ -129,6 +129,11 @@ export function describe(prev: Observation | undefined, cur: Observation, diffsI
   const full = (head: string) => ({ kind: "full" as const, text: `${head}${head ? "\n" : ""}${render(cur)}` });
   if (!prev || prev.error || !prev.elements || cur.error || !cur.elements) return full("");
   const c = changes(prev, cur);
+  // A dialog that opens or closes changes what can be used (the window behind a sheet waits): say so first, and
+  // send the whole screen so its buttons (or what is usable again) are in front of the caller.
+  if (cur.sheet !== prev.sheet) return full(cur.sheet !== undefined
+    ? `changed: a dialog is up${cur.sheet ? `: "${cur.sheet}"` : ""}. Its controls are listed first; full screen below.`
+    : "changed: the dialog closed. Full screen below; refs that are not in it are gone.");
   // Before the no-change test: a new window can look exactly like the old one ("Untitled", empty).
   if (c.other) return full(`changed: now in ${cur.app} | ${cur.window}${cur.window === prev.window && cur.app === prev.app ? " (another window)" : ""}. Use only the refs below.`);
   if (exact(prev) === exact(cur)) {

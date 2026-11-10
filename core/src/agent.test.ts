@@ -24,13 +24,14 @@ class Fake implements Driver {
     public onAct: (a: Action, f: Fake) => object | void = () => {}) {}
   el(ref: string) { return this.els.find((e) => e.ref === ref); }
   window_id?: number;
+  sheet?: string;  // a sheet / dialog is up (the helper's observe field)
   churn = 0;  // > 0: an app that hands out new element objects (so new refs) on every read
   async observe(_app?: string, opts: { quiet?: boolean } = {}): Promise<Observation> {
     this.log.push("observe");
     this.quiet.push(!!opts.quiet);
     const els = this.churn ? this.els.map((e, i) => ({ ...e, ref: `e${++this.churn * 100 + i}` })) : this.els;
     if (this.churn) this.lastRefs = new Map(els.map((e, i) => [e.ref, this.els[i].ref]));
-    return structuredClone({ app: this.app, window: this.window, ...(this.window_id ? { window_id: this.window_id } : {}), elements: els });
+    return structuredClone({ app: this.app, window: this.window, ...(this.window_id ? { window_id: this.window_id } : {}), ...(this.sheet !== undefined ? { sheet: this.sheet } : {}), elements: els });
   }
   lastRefs = new Map<string, string>();  // churn: ref handed out -> the element's own ref
   async act(a: Action) {
@@ -376,6 +377,38 @@ describe("local check: wrong done is worse than one more planner call", () => {
     expect(unseenClaim("ocu7k2 已写入", "写 ocu7k2", o, [])).toBeUndefined();  // digits inside a word are no number
     expect(unseenClaim("37 × 12 = 444", "算 37 乘以 12", { ...o, elements: [el("e1", "Text", "444")] }, [])).toBeUndefined();
     expect(unseenClaim("出生于 1912 年", "他出生在哪一年", o, ['{"action":"find_text"} -> ok\n  answer: Born 23 June 1912'])).toBeUndefined();
+  });
+});
+
+describe("dialogs (the helper's sheet field)", () => {
+  // Pages: "Export" opens a sheet; inside it "Options" expands a section. Saving over a file raises "Replace?".
+  const pages = () => new Fake("Pages", "报告", [el("e1", "Button", "导出"), el("e2", "Button", "存储"), el("e9", "TextArea", "正文")], (a, f) => {
+    const ref = (a as { ref?: string }).ref;
+    if (ref === "e1") { f.sheet = "导出"; f.els = [el("e20", "Button", "选项"), el("e21", "Button", "取消"), ...f.els]; }
+    if (ref === "e20") f.els = [el("e22", "Text", "PDF 选项已展开"), ...f.els];
+    if (ref === "e2") { f.sheet = "“报告.pages”已存在。要替换它吗？"; f.els = [el("e30", "Text", "已存储"), el("e31", "Button", "替换"), ...f.els]; }
+  });
+
+  test("a dialog that came up during the batch sends the turn to the planner, whatever else is on screen", async () => {
+    const f = pages();
+    const p = planner([press("e2"), { action: "done", summary: "saved", expect: "已存储" }], [{ action: "done", summary: "asks to replace" }]);
+    expect(await runTask("save", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ turns: 2 });
+    expect(p.calls[1].history.at(-1)).toContain("a dialog came up");
+  });
+
+  test("a dialog that was already up at the start doesn't block the check", async () => {
+    const f = pages();
+    f.sheet = "导出"; f.els = [el("e20", "Button", "选项"), el("e21", "Button", "取消"), ...f.els];
+    const p = planner([press("e20"), { action: "done", summary: "options shown", expect: "PDF 选项已展开" }]);
+    expect(await runTask("show the export options", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ ok: true, turns: 1 });
+  });
+
+  test("a step whose element is now behind a new sheet waits for the planner", async () => {
+    const f = pages();
+    const p = planner([press("e1"), { action: "set_value", ref: "e9", text: "x" }], [{ action: "done", summary: "x" }]);
+    await runTask("export", { driver: f, decide: p.decide, noCache: true });
+    expect(f.log.some((x) => x.startsWith("set_value"))).toBe(false);
+    expect(p.calls[1].obs.sheet).toBe("导出");
   });
 });
 
