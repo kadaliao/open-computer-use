@@ -35,18 +35,19 @@ export const waits = {
  * (no raising, no glow), and the last one decides which refs can be acted on.
  * before: shape() of the screen the action ran on. While the screen still equals it, the action may just be
  * slow to show (page loads start late), so "nothing changed" is accepted only after the quiet time.
- * enough: stop as soon as this holds (an expected text is up).
+ * enough: stop as soon as this holds (an expected text is up). min: don't stop for stability before this many ms
+ * (a settings pane highlights its row at once and switches its title a few hundred ms later).
  */
 export async function settle(read: (quiet: boolean) => Promise<Observation>,
-    opts: { before?: string; enough?: (o: Observation) => boolean; step?: boolean } = {}): Promise<Observation> {
+    opts: { before?: string; enough?: (o: Observation) => boolean; step?: boolean; min?: number } = {}): Promise<Observation> {
   const t0 = performance.now(), { before, enough } = opts;
   let prev = await read(false), was = shape(prev), stable = 0, reads = 1, why = "max";
   let first = before !== undefined && was !== before ? Math.round(performance.now() - t0) : -1;
   const quiet = isBrowser(prev.app) ? waits.quietBrowser : opts.step ? waits.quietStep : waits.quiet;
   while (performance.now() - t0 < waits.max) {
     if (enough?.(prev)) { why = "enough"; break; }
-    const moved = before === undefined || was !== before;
-    if (moved ? stable >= 1 : stable >= 2 && performance.now() - t0 >= quiet) { why = moved ? "stable" : "unchanged"; break; }
+    const moved = before === undefined || was !== before, early = performance.now() - t0 < (opts.min ?? 0);
+    if (!early && (moved ? stable >= 1 : stable >= 2 && performance.now() - t0 >= quiet)) { why = moved ? "stable" : "unchanged"; break; }
     await sleep(waits.poll);
     const cur = await read(true), now = shape(cur);
     reads++;

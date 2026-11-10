@@ -1,7 +1,7 @@
 import { MacDriver, type Element, type Observation } from "./driver.ts";
 import { decide as planDecide, type ActStep, type Expect, type Step } from "./policy.ts";
 import { ask, locate, VISION_MAX } from "./vision.ts";
-import { bigChange, changes, changesUI, gapAfter, settle, shape } from "./screen.ts";
+import { bigChange, changes, changesUI, gapAfter, isBrowser, settle, shape, waits } from "./screen.ts";
 import * as cache from "./cache.ts";
 
 /** What the loop needs from the helper. Callers that already run one (the MCP server) pass it in; tests pass a fake. */
@@ -23,8 +23,9 @@ const reader = (driver: Driver) => (quiet: boolean) => driver.observe(undefined,
 // Text on these roles proves nothing: controls name places you could go next, one-line fields echo what was typed.
 const NO_PROOF = new Set(["Button", "MenuItem", "MenuBarItem", "MenuButton", "Link", "Tab", "CheckBox", "RadioButton",
   "PopUpButton", "Row", "Cell", "List", "Slider", "TextField", "SearchField", "ComboBox"]);
-// Case, width, line breaks and digit grouping ("6,912", "6 912" vs "6912") don't matter (NFKC turns no-break spaces into spaces).
-const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/(\d)[,' ](?=\d{3}(?!\d))/g, "$1").replace(/\s+/g, " ").trim();
+// Case, width, line breaks and digit grouping ("6,912", "6 912" vs "6912") don't matter (NFKC turns no-break spaces into
+// spaces), nor invisible format marks (Calculator writes "\u200e21" and "\u200e7\u200e+\u200e7").
+const norm = (s: string) => s.normalize("NFKC").replace(/\p{Cf}/gu, "").toLowerCase().replace(/(\d)[,' ](?=\d{3}(?!\d))/g, "$1").replace(/\s+/g, " ").trim();
 const textOf = (e: Element) => [e.label, e.value].filter(Boolean).join(" ");
 const content = (o: Observation) => (o.elements ?? []).filter((e) => !NO_PROOF.has(e.role)).map((e) => norm(textOf(e)));
 // A text area's own text: its value when it has a title, else its label (the helper cuts labels at 80 characters).
@@ -103,6 +104,19 @@ export function proofOf(goal: string, done: { summary?: string; expect?: Expect 
 
 // Numbers and quoted strings a summary states. Numbers stand alone (the 7 in "ocu7k2" is not one).
 const CLAIMS = /“([^”]+)”|"([^"]+)"|「([^」]+)」|‘([^’]+)’|(?<![A-Za-z0-9.,])\d+(?:[.,]\d+)*(?![A-Za-z0-9])/g;
+/**
+ * The first name the goal quotes (“应用程序”, “实用工具”) that the summary and expect leave out. A goal in stages names
+ * its stages; a summary that skips one says the batch stopped early ("open 应用程序, then go into 实用工具" is not done
+ * once 应用程序 is open).
+ */
+export function skippedPart(goal: string, summary: string, expect: Expect | undefined): string | undefined {
+  const said = norm([summary, ...(Array.isArray(expect) ? expect : expect ? [expect] : [])].join(" "));
+  for (const m of goal.matchAll(/“([^”]+)”|"([^"]+)"|「([^」]+)」/g)) {
+    const q = norm(m.slice(1).find(Boolean) ?? "");
+    if (q && !has(said, q)) return q;
+  }
+}
+
 /**
  * The first number or quoted string in `summary` that is in neither the goal, the final screen (any element, title
  * included) nor the history (what earlier reads and notes said). Such a summary claims something nobody has seen,
@@ -329,17 +343,22 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
             log(`[${i}] done not accepted: expect ${JSON.stringify(step.expect)} is not an answer`);
             break;
           }
-          const now = await settle(read, { before: unsettled ? before : undefined, enough: (o) => confirmed(proof, seen, o, typed) });
+          // Watch the full quiet time unless the text shows up: a pane may switch its title after its row lights up.
+          const min = isBrowser(plan.app) ? waits.quietBrowser : waits.quiet;
+          const now = await settle(read, { before: unsettled ? before : undefined, enough: (o) => confirmed(proof, seen, o, typed), min });
           const ok = confirmed(proof, seen, now, typed);
-          // Even with the expected text up, a summary must not state numbers or names nobody has seen.
-          const claim = ok ? unseenClaim(step.summary, goal, now, history) : undefined;
-          const s = push({ step, ...(ok && !claim ? {} : { error: claim ? "not accepted" : "not confirmed" }) }, { wait_ms: wait + lap() });
-          if (ok && !claim) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
-          if (claim) say(`${done} -> not accepted: your summary says "${claim}", which is not on the screen. Check the screen, then reply done with what it shows`);
+          // Even with the expected text up, the summary must cover every part the goal names, and must not state
+          // numbers or names nobody has seen.
+          const skipped = ok ? skippedPart(goal, step.summary, step.expect) : undefined;
+          const claim = ok && !skipped ? unseenClaim(step.summary, goal, now, history) : undefined;
+          const s = push({ step, ...(ok && !claim && !skipped ? {} : { error: claim || skipped ? "not accepted" : "not confirmed" }) }, { wait_ms: wait + lap() });
+          if (ok && !claim && !skipped) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
+          if (skipped) say(`${done} -> not accepted: the goal also asks for "${skipped}", which your summary doesn't cover. Check the screen and do what is left`);
+          else if (claim) say(`${done} -> not accepted: your summary says "${claim}", which is not on the screen. Check the screen, then reply done with what it shows`);
           else if (dialogCame(plan, now)) say(`${done} -> not confirmed: a dialog came up${now.sheet ? ` ("${now.sheet}")` : ""}. Deal with it first, then reply done when the goal is achieved`);
           else say(`${done} -> not confirmed: that text did not newly appear on screen (or it only echoes what you typed, or a new window came up). ` +
             `Check the screen: continue, or reply done (no expect needed) if the goal is achieved`);
-          log(`[${i}] done not ${claim ? `accepted: unseen "${claim}"` : `confirmed: ${JSON.stringify(step.expect)} not new on screen`}`);
+          log(`[${i}] done not ${skipped ? `accepted: skips "${skipped}"` : claim ? `accepted: unseen "${claim}"` : `confirmed: ${JSON.stringify(step.expect)} not new on screen`}`);
           obs = now;  // just read and settled: plan on it
           unsettled = false;
           break;

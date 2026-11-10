@@ -22,7 +22,7 @@ async function call(name: string, tool: string, args: Record<string, unknown>) {
   const r: any = await client.callTool({ name: tool, arguments: args });
   const txt = (r.content ?? []).map((c: any) => c.text ?? `<${c.type} ${c.data?.length ?? 0}b>`).join("\n");
   const kind = /Only these lines changed/.test(txt) ? "diff" : /^did not change/m.test(txt) && !/renumbered/.test(txt) ? "same" : "full";
-  out[name] = { ms: Math.round(performance.now() - t), chars: txt.length, ...(tool === "act" ? { kind } : {}) };
+  out[name] = { ms: Math.round(performance.now() - t), chars: txt.length, ...(tool === "act" && /^app: /m.test(txt) ? { kind } : {}) };
   return txt as string;
 }
 const refOf = (screen: string, role: string, label: RegExp) => {

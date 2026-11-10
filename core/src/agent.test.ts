@@ -298,6 +298,10 @@ describe("local check: wrong done is worse than one more planner call", () => {
     expect(has("reports", "report")).toBe(false);
     expect(has("ocu7k2 notes", "ocu7k2 notes")).toBe(true);
     expect(has("电池电量72%", "电量")).toBe(true);  // no word breaks in Chinese
+    // Calculator's display carries left-to-right marks: "\u200e6,912", "\u200e7\u200e+\u200e7".
+    const o = (els: Element[]): Observation => ({ app: "计算器", window: "计算器", elements: els });
+    expect(confirmed("6912", [o([el("e2", "Text", "\u200e0")])], o([el("e2", "Text", "\u200e6,\u200e912")]))).toBe(true);
+    expect(confirmed("444", [o([el("e2", "Text", "\u200e0")])], o([el("e2", "Text", "\u200e4,\u200e440")]))).toBe(false);
   });
 
   test("a live batch whose display shows 4,440 doesn't prove 444", async () => {
@@ -377,6 +381,29 @@ describe("local check: wrong done is worse than one more planner call", () => {
     expect(unseenClaim("ocu7k2 已写入", "写 ocu7k2", o, [])).toBeUndefined();  // digits inside a word are no number
     expect(unseenClaim("37 × 12 = 444", "算 37 乘以 12", { ...o, elements: [el("e1", "Text", "444")] }, [])).toBeUndefined();
     expect(unseenClaim("出生于 1912 年", "他出生在哪一年", o, ['{"action":"find_text"} -> ok\n  answer: Born 23 June 1912'])).toBeUndefined();
+  });
+});
+
+// Seen in the first desktop benchmark (stage 2).
+describe("desktop findings", () => {
+  test("a goal in stages isn't done when the summary skips a stage it names (finder-utilities)", async () => {
+    const finder = () => new Fake("访达", "文稿", [el("e5", "Row", "应用程序"), el("e6", "Row", "下载")], (a, f) => {
+      if (a.action === "press") { f.window = "应用程序"; f.els = [...f.els, el("e30", "Row", "实用工具"), el("e31", "Row", "计算器")]; }
+    });
+    const p = planner([press("e5"), { action: "done", summary: "已在访达中打开“应用程序”文件夹", expect: "应用程序" }], [press("e30")], [{ action: "done", summary: "进入了实用工具" }]);
+    const r = await runTask("在访达里打开“应用程序”文件夹，再进入其中的“实用工具”文件夹", { driver: finder(), decide: p.decide, noCache: true });
+    expect(r.turns).toBe(3);
+    expect(p.calls[1].history.at(-1)).toContain('also asks for "实用工具"');
+  });
+
+  test("a settings pane whose title switches after its row lights up is still confirmed in one turn (settings-wallpaper)", async () => {
+    const f = new Fake("系统设置", "Wi-Fi", [el("e17", "Row", "墙纸"), el("e18", "Row", "通用")], (a, f) => {
+      if (a.action !== "press") return;
+      f.el("e17")!.state = ["selected"];  // at once
+      setTimeout(() => { f.window = "墙纸"; f.els = [...f.els, el("e40", "Text", "动态墙纸")]; }, 50);  // later
+    });
+    const p = planner([press("e17"), { action: "done", summary: "已打开墙纸页面", expect: "墙纸" }]);
+    expect(await runTask("打开系统设置里的墙纸页面", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ ok: true, turns: 1 });
   });
 });
 

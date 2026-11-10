@@ -74,7 +74,9 @@ export class MacDriver {
   }
   /** max: longest side of the image in pixels (the helper only shrinks). */
   screenshot(max?: number): Promise<Shot> { return this.call({ cmd: "screenshot", ...(max ? { max } : {}) }); }
-  act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> { return this.call({ cmd: "act", ...a }); }
+  act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
+    return this.call({ cmd: "act", ...a }).then(({ id: _, ...r }) => r);  // the request id means nothing to callers
+  }
   close() { this.dead ??= "closed"; this.proc.removeAllListeners("exit"); this.proc.kill(); }
 }
 

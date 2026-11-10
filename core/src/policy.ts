@@ -24,7 +24,7 @@ const BATCH = `Send in one reply every step you can already predict, one JSON ob
   (select all, then press Bold). Any other step with a ref ends the batch; you then see the new screen.
   A run of presses (calculator keys) goes straight on with the refs you were shown.`;
 const DONE = `Finishing: {"action":"done","summary":"...","expect":"..."}; summary is one short sentence with any answer the goal asks for.
-done means every part of the goal is achieved ("open X, then do Y" is done after Y, not after X).
+done means every part of the goal is achieved ("open X, then do Y" / "打开 X，再进入 Y" is done after Y, not after X).
 A reply that stops before the goal is achieved simply ends without done: you then see the new screen.
 - As the first step of a reply, done means the screen you see shows the goal achieved; never assume.
 - After other steps, add done only if they finish the whole goal and you already know any answer it asks for. Give
