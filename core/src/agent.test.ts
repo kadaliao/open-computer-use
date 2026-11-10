@@ -4,9 +4,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Action, Element, Observation } from "./driver.ts";
-import { confirmed, runTask, timing, type Decide, type Driver } from "./agent.ts";
+import { confirmed, has, proofOf, runTask, timing, unseenClaim, type Decide, type Driver } from "./agent.ts";
 import { decide } from "./policy.ts";
-import { waits } from "./screen.ts";
+import { settle, waits } from "./screen.ts";
 import type { Step } from "./policy.ts";
 
 // Never touch the user's cache; short waits so the suite runs in a few seconds.
@@ -23,12 +23,18 @@ class Fake implements Driver {
   constructor(public app: string, public window: string, public els: Element[],
     public onAct: (a: Action, f: Fake) => object | void = () => {}) {}
   el(ref: string) { return this.els.find((e) => e.ref === ref); }
+  window_id?: number;
+  churn = 0;  // > 0: an app that hands out new element objects (so new refs) on every read
   async observe(_app?: string, opts: { quiet?: boolean } = {}): Promise<Observation> {
     this.log.push("observe");
     this.quiet.push(!!opts.quiet);
-    return structuredClone({ app: this.app, window: this.window, elements: this.els });
+    const els = this.churn ? this.els.map((e, i) => ({ ...e, ref: `e${++this.churn * 100 + i}` })) : this.els;
+    if (this.churn) this.lastRefs = new Map(els.map((e, i) => [e.ref, this.els[i].ref]));
+    return structuredClone({ app: this.app, window: this.window, ...(this.window_id ? { window_id: this.window_id } : {}), elements: els });
   }
+  lastRefs = new Map<string, string>();  // churn: ref handed out -> the element's own ref
   async act(a: Action) {
+    if (this.churn && "ref" in a && a.ref) a = { ...a, ref: this.lastRefs.get(a.ref) ?? "gone" } as Action;
     this.log.push(`${a.action}${"ref" in a && a.ref ? ` ${a.ref}` : ""}`);
     if ("ref" in a && a.ref && !this.el(a.ref)) return { error: "unknown ref" };
     return { ok: true, ...(this.onAct(a, this) ?? {}) };
@@ -84,7 +90,7 @@ function calculator(display = "0", relabel = false) {
   });
 }
 const press = (ref: string): Step => ({ action: "press", ref });
-const keyRefs = (f: Fake, labels: string[]) => labels.map((l) => press(f.els.find((e) => e.label === l)!.ref));
+const keyRefs = (f: Fake, labels: string[]) => labels.map((l) => press(f.els.find((e) => e.role === "Button" && e.label === l)!.ref));
 
 describe("batching past a screen change", () => {
   test("goes on with steps that need no ref, after the screen settles", async () => {
@@ -278,6 +284,121 @@ describe("done with expect", () => {
   });
 });
 
+// Cases an independent review reproduced against the first version of the local check (scratchpad review/probe).
+describe("local check: wrong done is worse than one more planner call", () => {
+  test("numbers and latin words match as whole tokens only", () => {
+    expect(has("4440", "444")).toBe(false);
+    expect(has("-444", "444")).toBe(false);
+    expect(has("444.5", "444")).toBe(false);
+    expect(has("1.444", "444")).toBe(false);
+    expect(has("= 444", "444")).toBe(true);
+    expect(has("12-444", "444")).toBe(true);   // a minus between numbers is an operator, not a sign
+    expect(has("report.rtf", "report")).toBe(true);
+    expect(has("reports", "report")).toBe(false);
+    expect(has("ocu7k2 notes", "ocu7k2 notes")).toBe(true);
+    expect(has("电池电量72%", "电量")).toBe(true);  // no word breaks in Chinese
+  });
+
+  test("a live batch whose display shows 4,440 doesn't prove 444", async () => {
+    const f = calculator();
+    const p = planner([...keyRefs(f, ["3", "7", "乘", "1", "2", "0", "等于"]), { action: "done", summary: "444", expect: "444" }], [{ action: "done", summary: "4440" }]);
+    expect(await runTask("37*120", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ summary: "4440", turns: 2 });
+    expect(f.els[0].label).toBe("4,440");
+  });
+
+  // TextEdit save: cmd+s opens the save sheet with a name field; return raises "already exists".
+  const editor = () => {
+    let stage = 0;
+    return new Fake("文本编辑", "未命名", [el("e1", "TextArea", "some text")], (a, f) => {
+      if (a.action === "key" && a.key === "cmd+s") { stage = 1; f.els = [...f.els, el("e2", "TextField", "未命名")]; }
+      else if (a.action === "type" && stage === 1) f.el("e2")!.label = a.text;
+      else if (a.action === "key" && a.key === "return" && stage === 1) {
+        stage = 2;
+        f.els = [...f.els, el("e3", "Text", "“report.rtf”已存在。要替换它吗？"), el("e4", "Button", "替换"), el("e5", "Button", "取消")];
+      }
+    });
+  };
+  test("typed text echoed in an alert is no proof", async () => {
+    const f = editor();
+    const p = planner([{ action: "key", key: "cmd+s" }, { action: "type", text: "report" }, { action: "key", key: "return" },
+      { action: "done", summary: "saved as report", expect: "report" }], [{ action: "done", summary: "asks to replace" }]);
+    const r = await runTask("save the document as report", { driver: f, decide: p.decide });
+    expect(r.turns).toBe(2);
+    expect(p.calls[1].history.at(-1)).toContain("not confirmed");
+    expect(p.calls[1].obs.elements.some((e) => e.label.includes("已存在"))).toBe(true);  // the planner sees the alert
+  });
+
+  test("echoes of typed text: no results, can't find the server, text in the old note", () => {
+    const o = (window: string, els: Element[]): Observation => ({ app: "x", window, elements: els });
+    const search = o("Mail", [el("e1", "SearchField", "")]);
+    expect(confirmed("foo", [search], o("Mail", [el("e1", "SearchField", "foo"), el("e2", "Text", "No results for “foo”")]),
+      { texts: ["foo"], last: false })).toBe(false);
+    const safari = o("Apple", [el("e3", "TextField", "智能搜索栏")]);
+    expect(confirmed("example.com", [safari], o("找不到服务器", [{ ...el("e3", "TextField", "智能搜索栏"), value: "example.com" },
+      el("e9", "Text", "Safari 浏览器找不到服务器“example.com”。")]), { texts: ["example.com"], last: false })).toBe(false);
+    // The new note didn't open in time and the text went into the old one: typing was last, but the area holds more.
+    const old = o("备忘录", [el("e9", "TextArea", "购物清单 牛奶")]);
+    expect(confirmed("hello", [old], o("备忘录", [el("e9", "TextArea", "购物清单 牛奶hello")]), { texts: ["hello"], last: true })).toBe(false);
+    // The real thing: a new note whose whole text is what was typed.
+    expect(confirmed("hello", [old], o("备忘录", [el("e9", "TextArea", "购物清单 牛奶"), el("e10", "TextArea", "hello")]), { texts: ["hello"], last: true })).toBe(true);
+  });
+
+  test("a window that comes up at the end of the batch sends the turn to the planner", async () => {
+    const f = new Fake("访达", "下载", [el("e1", "Row", "旧文件夹"), el("e2", "Button", "删除")], (a, f) => {
+      if (a.action === "press") { f.window_id = 99; f.window = ""; f.els = [el("e7", "Text", "已删除 1 个项目，要继续吗？"), el("e8", "Button", "好")]; }
+    });
+    f.window_id = 5;
+    const p = planner([press("e2"), { action: "done", summary: "deleted", expect: "已删除" }], [{ action: "done", summary: "asks first" }]);
+    expect(await runTask("delete it", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ turns: 2 });
+  });
+
+  test("question words beyond 告诉 / what: 几, 查看, 吗, check, find out, show me", () => {
+    // The expect is a word of the goal (the page it names): for a question that proves nothing.
+    for (const [g, w] of [["电池还剩百分之几", "电池"], ["查看蓝牙状态", "蓝牙"], ["看看下载文件夹里有什么", "下载"], ["蓝牙开着吗", "蓝牙"],
+      ["check the battery", "battery"], ["find out the battery level", "battery"], ["show me the battery", "battery"]])
+      expect(proofOf(g, { summary: `${w}: 85%`, expect: w })).toEqual([]);
+    expect(proofOf("save the document as report", { summary: "saved", expect: "report" })).toEqual(["report"]);  // not a question
+    expect(proofOf("打开电池页面", { summary: "opened", expect: "电池" })).toEqual(["电池"]);  // an action goal may name the page
+  });
+
+  test("a guessed number in the summary sends the planner to look, even when the question slipped past the words", async () => {
+    const settings = () => new Fake("系统设置", "Wi-Fi", [el("e1", "Row", "电池")], (a, f) => {
+      if (a.action === "press") { f.window = "电池"; f.els = [f.els[0], el("e2", "Text", "电池电量 72%")]; }
+    });
+    const asks = planner([press("e1"), { action: "done", summary: "电池还剩 85%", expect: "电池" }], [{ action: "done", summary: "电池还剩 72%" }]);
+    expect(await runTask("电池还剩百分之几", { driver: settings(), decide: asks.decide, noCache: true })).toMatchObject({ summary: "电池还剩 72%", turns: 2 });
+    const plain = planner([press("e1"), { action: "done", summary: "已打开电池页面，电量 85%", expect: "电池" }], [{ action: "done", summary: "电量 72%" }]);
+    const r = await runTask("打开电池页面", { driver: settings(), decide: plain.decide, noCache: true });
+    expect(r).toMatchObject({ summary: "电量 72%", turns: 2 });
+    expect(plain.calls[1].history.at(-1)).toContain('your summary says "85"');
+    const o: Observation = { app: "x", window: "电池", elements: [el("e2", "Text", "电池电量 72%")] };
+    expect(unseenClaim("电量 72%，共 “电池” 一页", "打开电池页面", o, [])).toBeUndefined();
+    expect(unseenClaim("ocu7k2 已写入", "写 ocu7k2", o, [])).toBeUndefined();  // digits inside a word are no number
+    expect(unseenClaim("37 × 12 = 444", "算 37 乘以 12", { ...o, elements: [el("e1", "Text", "444")] }, [])).toBeUndefined();
+    expect(unseenClaim("出生于 1912 年", "他出生在哪一年", o, ['{"action":"find_text"} -> ok\n  answer: Born 23 June 1912'])).toBeUndefined();
+  });
+});
+
+describe("apps that hand out new refs on every read", () => {
+  test("settle still sees the screen settle", async () => {
+    const f = new Fake("App", "w", [el("e1", "Button", "Go"), el("e2", "Text", "static")]);
+    f.churn = 1;
+    const t0 = performance.now();
+    await settle((q) => f.observe(undefined, { quiet: q }));
+    expect(performance.now() - t0).toBeLessThan(100);  // two equal reads, not the 600 ms maximum
+  });
+
+  test("the no-effect guard still recognises the same action", async () => {
+    const f = new Fake("App", "w", [el("e5", "Button", "Dead"), el("e6", "Text", "status")]);
+    f.churn = 1;
+    const byLabel = (o: Observation) => o.elements.find((e) => e.label === "Dead")!.ref;
+    const p = planner((_, o) => [press(byLabel(o))], (_, o) => [press(byLabel(o))], [{ action: "done", summary: "gave up" }]);
+    await runTask("x", { driver: f, decide: p.decide, noCache: true });
+    expect(f.log.filter((x) => x.startsWith("press")).length).toBe(1);
+    expect(p.calls[2].history.at(-1)).toContain("skipped: it had no visible effect");
+  });
+});
+
 describe("action cache", () => {
   test("records a run that batched past a screen change and replays it without the planner", async () => {
     const first = planner([press("e1"), { action: "type", text: "hello" }, { action: "done", summary: "note: hello", expect: "hello" }]);
@@ -286,23 +407,29 @@ describe("action cache", () => {
     const db = JSON.parse(readFileSync(process.env.OCU_CACHE_FILE!, "utf8"));
     const entry = db['[备忘录] new note {0}'];
     expect(entry.steps).toEqual([{ step: { action: "press" }, target: "Button 新建备忘录", nth: 0 }, { step: { action: "type", text: "{0}" } }]);
-    expect(entry.done).toEqual({ summary: "note: {0}", expect: ["{0}"] });
+    expect(entry.done).toEqual({ expect: ["{0}"] });  // the expect is the goal's own text: kept
     // Another parameter, and the button has another ref this time.
     const f = notes(30, "e7");
     const none = planner();
     const r2 = await runTask('new note "world"', { driver: f, decide: none.decide });
-    expect(r2).toMatchObject({ ok: true, summary: "note: world", turns: 0 });
+    expect(r2).toMatchObject({ ok: true, turns: 0 });
+    expect(r2.summary).toContain('"world" now on screen');  // nothing carried over from the old run's summary
     expect(f.el("e10")?.label).toBe("world");
     expect(r2.steps.every((s) => s.tier === "cache")).toBe(true);
     expect(JSON.parse(readFileSync(process.env.OCU_CACHE_FILE!, "utf8"))['[备忘录] new note {0}'].hits).toBe(1);
   });
 
-  test("keypad replay with other numbers asks the planner when the recorded result doesn't show", async () => {
+  test("a result read off the screen is never replayed: the planner checks after the keys", async () => {
     const f1 = calculator();
     const first = planner([...keyRefs(f1, ["3", "7", "乘", "1", "2", "等于"]), { action: "done", summary: "37 × 12 = 444", expect: "444" }]);
     expect((await runTask("算 37 乘以 12", { driver: f1, decide: first.decide })).ok).toBe(true);
-    const again = planner();
-    expect(await runTask("算 37 乘以 12", { driver: calculator(), decide: again.decide })).toMatchObject({ ok: true, turns: 0 });
+    expect(JSON.parse(readFileSync(process.env.OCU_CACHE_FILE!, "utf8"))["[计算器] 算 {0} 乘以 {1}"].done).toBeUndefined();
+    // The reviewer's case: 37 x 120 shows 4,440, which contains "444"; it must not finish as "37 × 120 = 444".
+    const f120 = calculator();
+    const check = planner([{ action: "done", summary: "37 × 120 = 4440" }]);
+    const r120 = await runTask("算 37 乘以 120", { driver: f120, decide: check.decide });
+    expect(r120).toMatchObject({ ok: true, summary: "37 × 120 = 4440", turns: 1 });
+    expect(f120.els[0].label).toBe("4,440");
     const f3 = calculator();
     const other = planner([{ action: "done", summary: "37 × 13 = 481" }]);
     const r3 = await runTask("算 37 乘以 13", { driver: f3, decide: other.decide });
@@ -318,8 +445,9 @@ describe("action cache", () => {
     expect(await runTask("clear test", { driver: f1, decide: first.decide })).toMatchObject({ ok: true, turns: 2 });
     expect(JSON.stringify(JSON.parse(readFileSync(process.env.OCU_CACHE_FILE!, "utf8"))["[计算器] clear test"].steps)).toContain("Button 清除");
     const f2 = calculator("0", true);
-    const r = await runTask("clear test", { driver: f2, decide: planner().decide });
-    expect(r).toMatchObject({ ok: true, turns: 0 });
+    const r = await runTask("clear test", { driver: f2, decide: planner([{ action: "done", summary: "42" }]).decide });
+    expect(r).toMatchObject({ ok: true, turns: 1 });
+    expect(r.steps.filter((s) => s.tier === "cache").length).toBe(5);  // every key replayed, then the planner looked
     expect(f2.els[0].label).toBe("42");
   });
 });

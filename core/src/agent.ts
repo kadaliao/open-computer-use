@@ -16,37 +16,100 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 // The agent works in the frontmost app. Settling polls are quiet (no raising, no glow).
 const reader = (driver: Driver) => (quiet: boolean) => driver.observe(undefined, { quiet });
 
-// done{expect} is checked here instead of by another planner call. Text on these roles proves nothing:
-// controls name places you could go next, one-line fields echo what was typed into them.
+// ---- The local check for done{expect} ----
+// It saves a planner round trip when the proof is solid. Whenever it is in doubt, the planner looks: a wrong
+// "done" costs far more than one more call.
+
+// Text on these roles proves nothing: controls name places you could go next, one-line fields echo what was typed.
 const NO_PROOF = new Set(["Button", "MenuItem", "MenuBarItem", "MenuButton", "Link", "Tab", "CheckBox", "RadioButton",
   "PopUpButton", "Row", "Cell", "List", "Slider", "TextField", "SearchField", "ComboBox"]);
 // Case, width, line breaks and digit grouping ("6,912", "6 912" vs "6912") don't matter (NFKC turns no-break spaces into spaces).
 const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/(\d)[,' ](?=\d{3}(?!\d))/g, "$1").replace(/\s+/g, " ").trim();
 const textOf = (e: Element) => [e.label, e.value].filter(Boolean).join(" ");
 const content = (o: Observation) => (o.elements ?? []).filter((e) => !NO_PROOF.has(e.role)).map((e) => norm(textOf(e)));
+// A text area's own text: its value when it has a title, else its label (the helper cuts labels at 80 characters).
+const areaText = (e: Element) => e.value ?? e.label;
+const areas = (o: Observation) => (o.elements ?? []).filter((e) => e.role === "TextArea");
 
+const alnum = /[a-z0-9]/;
+/**
+ * `want` in `text` as a whole token: a digit or latin letter may not continue it on either side, so "444" is not in
+ * "4440", "-444" or "444.5", and "port" not in "report". Chinese and Japanese have no word breaks and match anywhere.
+ * Both sides are norm()ed.
+ */
+export function has(text: string, want: string): boolean {
+  if (!want) return false;
+  const num0 = /^\d/.test(want), num1 = /\d$/.test(want);
+  for (let i = text.indexOf(want); i >= 0; i = text.indexOf(want, i + 1)) {
+    const b = text[i - 1] ?? "", bb = text[i - 2] ?? "", a = text[i + want.length] ?? "", aa = text[i + want.length + 1] ?? "";
+    if (alnum.test(want[0]) && alnum.test(b)) continue;
+    if (alnum.test(want.at(-1)!) && alnum.test(a)) continue;
+    if (num0 && ((b === "." && /\d/.test(bb)) || (/[-−]/.test(b) && !alnum.test(bb)))) continue;  // 1.444, -444
+    if (num1 && a === "." && /\d/.test(aa)) continue;                                             // 444.5
+    return true;
+  }
+  return false;
+}
+
+/** What the batch typed or set (type / set_value texts), and whether that was its last action. */
+export type Typed = { texts: string[]; last: boolean };
 /**
  * Did the batch bring `expect` on screen? It must now be in the window title or in a content element, and must not
  * have been in that place on any `seen` screen (the one the batch was planned on, and those read during it).
+ * Text the batch typed itself shows up wherever it went: in an error ("“report.rtf” already exists", "No results for
+ * …", "can't find the server “…”") or in the wrong document. So an expect that overlaps typed text counts only when the
+ * typing was the batch's last action and a text area now holds exactly that text, which it didn't before.
+ * A window that appeared at the end of the batch (an alert, another document) always sends the turn to the planner.
  * Shorter than 2 characters is too easy to hit by chance.
  */
-export function confirmed(expect: Expect | undefined, seen: Observation[], now: Observation): boolean {
+export function confirmed(expect: Expect | undefined, seen: Observation[], now: Observation, typed: Typed = { texts: [], last: false }): boolean {
   if (!expect || now.error || !now.elements) return false;
+  const last = seen.at(-1);
+  if (last && (last.app !== now.app || (last.window_id !== undefined && now.window_id !== undefined && last.window_id !== now.window_id))) return false;
   const wants = (Array.isArray(expect) ? expect : [expect]).map((w) => norm(String(w))).filter((w) => w.length >= 2);
   const title = norm(now.window ?? ""), body = content(now);
   const titles = seen.map((o) => norm(o.window ?? "")), bodies = seen.flatMap(content);
-  return wants.some((w) => (title.includes(w) && !titles.some((t) => t.includes(w))) ||
-    (body.some((t) => t.includes(w)) && !bodies.some((t) => t.includes(w))));
+  const ts = typed.texts.map(norm).filter((t) => t.length >= 2);
+  const whole = [norm(typed.texts.at(-1) ?? ""), norm(typed.texts.join(" "))];
+  return wants.some((w) => {
+    if (ts.some((t) => t.includes(w) || w.includes(t))) {
+      if (!typed.last) return false;
+      if (seen.some((o) => areas(o).some((e) => has(norm(areaText(e)), w)))) return false;
+      return areas(now).some((e) => {
+        const t = norm(areaText(e));
+        return has(t, w) && whole.some((x) => x === t || (e.label.length >= 80 && x.startsWith(t)));
+      });
+    }
+    return (has(title, w) && !titles.some((t) => has(t, w))) || (body.some((t) => has(t, w)) && !bodies.some((t) => has(t, w)));
+  });
 }
 
-// A goal that asks for an answer ("告诉我…", "what is…"): expect must be the answer, so it has to be in the summary and
-// must not be just words of the goal. A page or option the goal names says nothing about which answer is right.
-const ASKS = /告诉|是什么|是多少|多少|哪|[？?]|\b(tell|what|which|who|when|where|how many|how much)\b/i;
+// A goal that asks for an answer ("告诉我…", "电池还剩百分之几", "what is…", "check whether…"): expect must be the
+// answer, so it has to be in the summary and must not be just words of the goal. A page or option the goal names says
+// nothing about which answer is right.
+const ASKS = new RegExp(["告诉", "是什么", "是多少", "多少", "几", "哪", "是否", "有没有", "吗", "呢", "查看", "看看", "看一下",
+  "查一下", "检查", "确认", "读出", "读一下", "列出", "[？?]",
+  "\\b(tell|what|which|who|whom|whose|when|where|whether|why|how|check|find out|show me|look up|is there|are there|read)\\b"].join("|"), "i");
 export function proofOf(goal: string, done: { summary?: string; expect?: Expect }): string[] {
   const all = (Array.isArray(done.expect) ? done.expect : done.expect ? [done.expect] : []).map(String);
   if (!ASKS.test(goal)) return all;
   const g = norm(goal), s = norm(done.summary ?? "");
-  return all.filter((w) => !g.includes(norm(w)) && s.includes(norm(w)));
+  return all.filter((w) => !has(g, norm(w)) && has(s, norm(w)));
+}
+
+// Numbers and quoted strings a summary states. Numbers stand alone (the 7 in "ocu7k2" is not one).
+const CLAIMS = /“([^”]+)”|"([^"]+)"|「([^」]+)」|‘([^’]+)’|(?<![A-Za-z0-9.,])\d+(?:[.,]\d+)*(?![A-Za-z0-9])/g;
+/**
+ * The first number or quoted string in `summary` that is in neither the goal, the final screen (any element, title
+ * included) nor the history (what earlier reads and notes said). Such a summary claims something nobody has seen,
+ * e.g. a guessed "电池还剩 85%" while the screen says 72%: then the planner must look.
+ */
+export function unseenClaim(summary: string, goal: string, now: Observation, history: string[]): string | undefined {
+  const known = [goal, now.window ?? "", ...(now.elements ?? []).map(textOf), ...history].map(norm);
+  for (const m of summary.matchAll(CLAIMS)) {
+    const c = norm(m.slice(1).find(Boolean) ?? m[0]);
+    if (c && !known.some((k) => has(k, c))) return c;
+  }
 }
 
 // After the screen changed, a batch goes on with steps that don't point at an element of the old screen, and with
@@ -81,10 +144,26 @@ const fmtTime = (s: StepLog) => [s.obs_ms && `obs ${s.obs_ms}`, s.model_ms && `m
   s.act_ms && `act ${s.act_ms}`].filter(Boolean).join(" + ") || "0";
 const clock = () => { let t = performance.now(); return () => { const n = performance.now(), d = Math.round(n - t); t = n; return d; }; };
 
+/**
+ * An action as the loop guards compare it: the ref replaced by the element's role, label and place among same-named
+ * ones, so a repeat is recognised even in an app that hands out new refs on every read.
+ */
+const actKey = (step: any, on: Observation) => {
+  const at = typeof step.ref === "string" ? cache.nthOf(on, step.ref) : null;
+  return JSON.stringify(at ? { ...step, ref: `${at.target}#${at.nth}` } : step);
+};
+/** History for the planner, plus a key per line for the loop guards (actKey for actions). */
+type Say = (line: string, key?: string) => void;
+/** Track a batch's typing for confirmed(). */
+const noteTyping = (t: Typed, step: any) => {
+  if (step.action === "type" || step.action === "set_value") { t.texts.push(String(step.text ?? "")); t.last = true; }
+  else if (step.action !== "note") t.last = false;
+};
+
 /** Replay cached steps. Returns how many ran (stops at the first element that can't be found or fails) and the screens read. */
-async function replay(driver: Driver, cached: cache.CachedStep[], history: string[], record: cache.CachedStep[], steps: StepLog[], log: (s: string) => void) {
+async function replay(driver: Driver, cached: cache.CachedStep[], say: Say, record: cache.CachedStep[], steps: StepLog[], log: (s: string) => void) {
   let n = 0, needSettle = true, before: string | undefined;
-  const seen: Observation[] = [];
+  const seen: Observation[] = [], typed: Typed = { texts: [], last: false };
   for (const c of cached) {
     const lap = clock();
     // Keypad-style press runs resolve on the same read: their refs stay put while the display changes. A label
@@ -106,13 +185,14 @@ async function replay(driver: Driver, cached: cache.CachedStep[], history: strin
     steps.push(s);
     log(`[cache] ${fmtTime(s)}ms ${JSON.stringify(step)}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}`);
     if (res.error) break;
-    history.push(`${JSON.stringify(step)} -> ok`);
+    say(`${JSON.stringify(step)} -> ok`, actKey(step, obs));
+    noteTyping(typed, step);
     record.push(c);
     // Keypad-style press runs don't need to wait for the UI between keys.
     needSettle = changesUI(step) && !(step.action === "press" && cached[n + 1]?.step.action === "press");
     n++;
   }
-  return { n, seen, before };
+  return { n, seen, before, typed };
 }
 
 /** Screenshot fallback actions run here; everything else goes straight to the driver. */
@@ -141,7 +221,8 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
   const own = opts.driver ? undefined : new MacDriver();
   const driver: Driver = opts.driver ?? own!;
   const decide = opts.decide ?? planDecide;
-  const history: string[] = [];
+  const history: string[] = [], keys: string[] = [];
+  const say: Say = (line, key = line.split(" ")[0]) => { history.push(line); keys.push(key); };
   let turns = 0;                           // planner round trips
   let lastAct = { key: "", screen: "" };  // last action and the screen it ran on
   const record: cache.CachedStep[] = [];   // successful steps, for the cache
@@ -152,7 +233,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
     const fixedUp = steps.filter((s) => s.tier !== "cache").length > 1;  // the planner had to act after replay
     if (ok && cached && replayedAll && !fixedUp) cache.hit(goal);
     else if (cached) cache.forget(goal);  // the recording didn't fit this goal; the next run records afresh
-    else if (ok && cacheable) cache.store(goal, record, expect ? { summary, expect } : undefined);
+    else if (ok && cacheable) cache.store(goal, record, expect ? { expect } : undefined);
     return { ok, summary, steps, turns };
   };
   try {
@@ -166,21 +247,23 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
     if (!opts.noCache) cache.setStartApp(start.app);
     cached = opts.noCache ? null : cache.lookup(goal);
     if (cached) {
-      const r = await replay(driver, cached.steps, history, record, steps, log);
+      const r = await replay(driver, cached.steps, say, record, steps, log);
       replayedAll = r.n === cached.steps.length;
       obs = undefined; needSettle = true; before = r.before;
-      // The recorded run ended with done{expect}: if the replay brought that text up, it is done without a model call.
+      // The recorded run ended with done{expect} made of goal parameters only (cache.ts): if the replay brought that
+      // text up, the task is done without a model call. The summary says only that, nothing from the old run.
       const done = cached.done, proof = done ? proofOf(goal, done) : [];
       if (replayedAll && done && proof.length) {
         lap();
         const seen = [start, ...r.seen];
-        obs = await settle(read, { before, enough: (o) => confirmed(proof, seen, o) });
+        obs = await settle(read, { before, enough: (o) => confirmed(proof, seen, o, r.typed) });
         needSettle = false;
-        const ok = confirmed(proof, seen, obs);
-        steps.push({ tier: "cache", ...timed({ wait_ms: lap() }), step: { action: "done", summary: done.summary, expect: done.expect }, ...(ok ? {} : { error: "not confirmed" }) });
-        if (ok) { log(`done (cache, ${JSON.stringify(done.expect)} on screen): ${done.summary}`); return finish(true, done.summary); }
+        const ok = confirmed(proof, seen, obs, r.typed);
+        const summary = `replayed the steps of an earlier run; ${proof.map((p) => `"${p}"`).join(", ")} now on screen`;
+        steps.push({ tier: "cache", ...timed({ wait_ms: lap() }), step: { action: "done", summary, expect: done.expect }, ...(ok ? {} : { error: "not confirmed" }) });
+        if (ok) { log(`done (cache): ${summary}`); return finish(true, summary); }
       }
-      history.push(replayedAll ? "(the steps above were replayed from a previous successful run: check the screen and reply done if the goal is achieved)"
+      say(replayedAll ? "(the steps above were replayed from a previous successful run: check the screen and reply done if the goal is achieved)"
         : "(a previous run's steps were replayed up to here; continue from the current screen)");
     }
     for (let i = 0; i < (opts.maxSteps ?? 25); i++) {
@@ -205,6 +288,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         return entry;
       };
       const seen = [plan];   // screens read during this batch, for the done{expect} check
+      const typed: Typed = { texts: [], last: false };
       let cur = plan;        // the latest of them
       let refsOk = true;     // refs from `plan` still point where the planner thinks (no change yet, or a keypad run)
       let unsettled = false; // a screen-changing step ran and the screen hasn't visibly changed in a read since
@@ -234,41 +318,45 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
           }
           // At the end of a blind batch it counts only with an expected text that the batch brought on screen.
           if (!step.expect) break;
+          const done = `{"action":"done","expect":${JSON.stringify(step.expect)}}`;
           if (!proof.length) {
             push({ step, error: "not accepted" }, { wait_ms: wait });
-            history.push(`{"action":"done","expect":${JSON.stringify(step.expect)}} -> not accepted: the goal asks for an answer you have not read yet. Read it on the screen, then reply done`);
+            say(`${done} -> not accepted: the goal asks for an answer you have not read yet. Read it on the screen, then reply done`);
             log(`[${i}] done not accepted: expect ${JSON.stringify(step.expect)} is not an answer`);
             break;
           }
-          const now = await settle(read, { before: unsettled ? before : undefined, enough: (o) => confirmed(proof, seen, o) });
-          const ok = confirmed(proof, seen, now);
-          const s = push({ step, ...(ok ? {} : { error: "not confirmed" }) }, { wait_ms: wait + lap() });
-          if (ok) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
-          history.push(`{"action":"done","expect":${JSON.stringify(step.expect)}} -> not confirmed: that text did not newly appear on screen. ` +
+          const now = await settle(read, { before: unsettled ? before : undefined, enough: (o) => confirmed(proof, seen, o, typed) });
+          const ok = confirmed(proof, seen, now, typed);
+          // Even with the expected text up, a summary must not state numbers or names nobody has seen.
+          const claim = ok ? unseenClaim(step.summary, goal, now, history) : undefined;
+          const s = push({ step, ...(ok && !claim ? {} : { error: claim ? "not accepted" : "not confirmed" }) }, { wait_ms: wait + lap() });
+          if (ok && !claim) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
+          if (claim) say(`${done} -> not accepted: your summary says "${claim}", which is not on the screen. Check the screen, then reply done with what it shows`);
+          else say(`${done} -> not confirmed: that text did not newly appear on screen (or it only echoes what you typed, or a new window came up). ` +
             `Check the screen: continue, or reply done (no expect needed) if the goal is achieved`);
-          log(`[${i}] done not confirmed: ${JSON.stringify(step.expect)} not new on screen`);
+          log(`[${i}] done not ${claim ? `accepted: unseen "${claim}"` : `confirmed: ${JSON.stringify(step.expect)} not new on screen`}`);
           obs = now;  // just read and settled: plan on it
           unsettled = false;
           break;
         }
         // Same action on an unchanged screen already did nothing once: don't repeat it.
-        const key = JSON.stringify(step);
+        const key = JSON.stringify(step), same = actKey(step, plan);
         // Ping-pong (A, B, A, B, A, ...) between two actions is a loop too.
-        const recent = history.slice(-5).map((h) => h.split(" ")[0]);
-        const pingPong = recent.length === 5 && new Set(recent).size === 2 && recent[0] === recent[2] && recent[2] === recent[4] && recent[1] === key.split(" ")[0];
+        const recent = keys.slice(-5);
+        const pingPong = recent.length === 5 && new Set(recent).size === 2 && recent[0] === recent[2] && recent[2] === recent[4] && recent[1] === same;
         if (pingPong) {
-          history.push(`${key} -> skipped: you are alternating between the same two actions; record what you need with note, then do the remaining work`);
+          say(`${key} -> skipped: you are alternating between the same two actions; record what you need with note, then do the remaining work`, same);
           const s = push({ step, error: "skipped (ping-pong)" }, { wait_ms: wait });
           log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> skipped (ping-pong)`);
           break;
         }
-        if (k === 0 && key === lastAct.key && screen === lastAct.screen) {
-          history.push(`${key} -> skipped: it had no visible effect last time; choose a different action or approach`);
+        if (k === 0 && same === lastAct.key && screen === lastAct.screen) {
+          say(`${key} -> skipped: it had no visible effect last time; choose a different action or approach`, same);
           const s = push({ step, error: "skipped (no effect last time)" }, { wait_ms: wait });
           log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> skipped (no effect last time)`);
           break;
         }
-        if (k === 0) lastAct = { key, screen };
+        if (k === 0) lastAct = { key: same, screen };
         // The screen this step runs on, for the wait after it: re-read it when typing changed it since the last read,
         // or that change would pass for this step's effect.
         if (changesUI(step) && stale && !unsettled) { cur = await read(true); stale = false; }
@@ -285,10 +373,11 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         }
         const line = `${key}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;
         // Nudge the planner out of loops: same action 3 times in a row.
-        const repeats = history.slice(-2).filter((h) => h.startsWith(key)).length;
-        history.push(repeats === 2 ? `${line} (repeated 3 times with no progress - try a different approach)` : line);
+        const repeats = keys.slice(-2).filter((k) => k === same).length;
+        say(repeats === 2 ? `${line} (repeated 3 times with no progress - try a different approach)` : line, same);
         log(`[${i}] ${tier} ${fmtTime(s)}ms ${line}`);
         if (res.error) break;
+        noteTyping(typed, step);
         if (step.action === "read_visual" || step.action === "find_text") break; // the planner needs the answer
         stale = true;
         if (changesUI(step)) {

@@ -1,8 +1,8 @@
 // Action cache: "goal pattern -> actions that worked". A repeat task replays without calling any model.
 // Quoted strings and numbers in the goal become parameters, so "note 'abc'" also serves "note 'xyz'".
 // Element refs change between runs, so steps store the element's "Role label" and are resolved again on replay.
-// A run that ended with done{expect} also keeps its summary and expect: a replay that brings the expected text
-// on screen finishes without asking the planner.
+// A run that ended with done{expect} keeps the expect when it is made of goal parameters only (see fromGoal): a replay
+// that brings that text on screen finishes without asking the planner.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -14,7 +14,7 @@ const file = () => env.OCU_CACHE_FILE ?? join(homedir(), ".cache", "ocu", "actio
 export const cacheEnabled = () => env.OCU_CACHE !== "0";
 
 export type CachedStep = { step: Record<string, any>; target?: string; nth?: number; spell?: number; prefix?: string };
-export type CachedDone = { summary: string; expect: Expect };
+export type CachedDone = { expect: Expect };
 type Entry = { steps: CachedStep[]; done?: CachedDone; hits: number; saved: string };
 
 const PARAM = /"[^"]+"|'[^']+'|“[^”]+”|「[^」]+」|-?\d+(?:\.\d+)?/g;
@@ -49,6 +49,12 @@ function save(db: Record<string, Entry>) {
   writeFileSync(file(), JSON.stringify(db, null, 1));
 }
 const mapExpect = (x: Expect, f: (s: string) => string): Expect => (Array.isArray(x) ? x.map(f) : f(x));
+/**
+ * A templated expect made only of goal parameters ("{0}"): the text the goal itself asked for (a note's content, a
+ * name). Anything else came from the old run's screen (a result, a count, a title) and may not hold for the next
+ * goal: "算 37 乘以 12" showed 444, but "算 37 乘以 120" shows 4,440. Such runs replay and the planner checks.
+ */
+const fromGoal = (x: Expect) => (Array.isArray(x) ? x : [x]).every((s) => /^\s*(\{\d+\}\s*)+$/.test(s));
 
 /** Steps for this goal with parameters filled in (plus the recorded done, if any), or null. */
 export function lookup(goal: string): { steps: CachedStep[]; done?: CachedDone } | null {
@@ -61,7 +67,7 @@ export function lookup(goal: string): { steps: CachedStep[]; done?: CachedDone }
       ? [...(params[s.spell] ?? "")].map((ch) => ({ step: { action: "press" }, target: `${s.prefix}${ch}`, nth: 0 }))
       : [{ ...s, step: mapStrings(s.step, (x) => fill(x, params)), target: s.target && fill(s.target, params) }]);
   const f = (x: string) => fill(x, params);
-  return { steps, ...(e.done ? { done: { summary: f(e.done.summary), expect: mapExpect(e.done.expect, f) } } : {}) };
+  return { steps, ...(e.done && fromGoal(e.done.expect) ? { done: { expect: mapExpect(e.done.expect, f) } } : {}) };
 }
 
 // Reading steps produce answers that change from run to run; replaying them blindly would be wrong.
@@ -73,9 +79,10 @@ export function store(goal: string, steps: CachedStep[], done?: CachedDone) {
   const { key, params } = pattern(goal);
   const db = load();
   const t = (x: string) => templ(x, params);
+  const expect = done && mapExpect(done.expect, t);
   db[key] = {
     steps: spell(steps, params).map((s) => ({ ...s, step: mapStrings(s.step, t), target: s.target && t(s.target) })),
-    ...(done ? { done: { summary: t(done.summary), expect: mapExpect(done.expect, t) } } : {}),
+    ...(expect && fromGoal(expect) ? { done: { expect } } : {}),
     hits: db[key]?.hits ?? 0, saved: new Date().toISOString(),
   };
   save(db);
