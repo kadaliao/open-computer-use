@@ -407,6 +407,27 @@ describe("desktop findings", () => {
   });
 });
 
+describe("tab after a screen change", () => {
+  // TextEdit: cmd+f shows a find bar with one field; there is no replace field for tab to reach.
+  const editor = () => new Fake("文本编辑", "未命名", [el("e11", "TextArea", "ocu apple apple apple")], (a, f) => {
+    if (a.action === "key" && a.key === "cmd+f") f.els = [el("e20", "SearchField", "查找"), el("e21", "Button", "完成"), ...f.els];
+  });
+  test("ends the batch: where tab goes on an unseen bar is a guess", async () => {
+    const f = editor();
+    const p = planner([{ action: "key", key: "cmd+f" }, { action: "type", text: "apple" }, { action: "key", key: "tab" }, { action: "type", text: "pear" }],
+      [{ action: "done", summary: "x" }]);
+    await runTask("replace", { driver: f, decide: p.decide, noCache: true });
+    expect(f.log.filter((x) => !x.startsWith("observe"))).toEqual(["key", "type"]);
+    expect(p.calls[1].obs.elements.some((e) => e.label === "查找")).toBe(true);  // the planner sees the bar next
+  });
+  test("runs when nothing changed before it in the batch", async () => {
+    const f = editor();
+    const p = planner([{ action: "type", ref: "e11", text: " x" } as Step, { action: "key", key: "tab" }], [{ action: "done", summary: "x" }]);
+    await runTask("tab", { driver: f, decide: p.decide, noCache: true });
+    expect(f.log.filter((x) => !x.startsWith("observe"))).toEqual(["type e11", "key"]);
+  });
+});
+
 describe("dialogs (the helper's sheet field)", () => {
   // Pages: "Export" opens a sheet; inside it "Options" expands a section. Saving over a file raises "Replace?".
   const pages = () => new Fake("Pages", "报告", [el("e1", "Button", "导出"), el("e2", "Button", "存储"), el("e9", "TextArea", "正文")], (a, f) => {

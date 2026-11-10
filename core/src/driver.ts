@@ -37,6 +37,19 @@ const besideExe = join(dirname(process.execPath), "ocu-mac");
 export const BIN = process.env.OCU_MAC_BIN ??
   (existsSync(besideExe) ? besideExe : fileURLToPath(new URL("../../mac/.build/release/ocu-mac", import.meta.url)));
 
+/**
+ * Refs as callers see them: the helper's number plus 100. The helper counts from e1 in list order, so on a fresh
+ * screen a ref and its line position nearly match, and a planner that counts lines instead of copying the ref lands
+ * one off (DeepSeek pressed Calculator's "4" for "5" in 10 of 10 tries). Refs from e101 can't pass for positions:
+ * 0 of 10. MacDriver translates both ways; refs below e101 reach the helper as unknown.
+ */
+const REF_BASE = 100;
+export const toCaller = (ref: string) => ref.replace(/^e(\d+)$/, (_, n) => `e${Number(n) + REF_BASE}`);
+export const toHelper = (ref: string) => (/^e\d+$/.test(ref) ? `e${Number(ref.slice(1)) - REF_BASE}` : ref);
+/** An observation with caller refs (also inside a list's "scroll{ref:...}" hint). */
+export const callerRefs = (o: Observation): Observation => !o.elements ? o : { ...o, elements: o.elements.map((e) => ({ ...e,
+  ref: toCaller(e.ref), label: e.label.replace(/ref:"(e\d+)"/g, (_, r) => `ref:"${toCaller(r)}"`) })) };
+
 export class MacDriver {
   private proc = spawn(BIN, [], { stdio: ["pipe", "pipe", "pipe"] });
   private pending = new Map<number, { res: (v: any) => void; rej: (e: Error) => void }>();
@@ -70,12 +83,13 @@ export class MacDriver {
   trusted(): Promise<boolean> { return this.call({ cmd: "trust" }, 5000).then((r) => !!r.trusted); }
   /** quiet: a repeat read while waiting for the screen to settle (no raising, no glow). */
   observe(app?: string, opts: { quiet?: boolean } = {}): Promise<Observation> {
-    return this.call({ cmd: "observe", ...(app ? { app } : {}), ...(opts.quiet ? { quiet: true } : {}) });
+    return this.call({ cmd: "observe", ...(app ? { app } : {}), ...(opts.quiet ? { quiet: true } : {}) }).then(callerRefs);
   }
   /** max: longest side of the image in pixels (the helper only shrinks). */
   screenshot(max?: number): Promise<Shot> { return this.call({ cmd: "screenshot", ...(max ? { max } : {}) }); }
   act(a: Action): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
-    return this.call({ cmd: "act", ...a }).then(({ id: _, ...r }) => r);  // the request id means nothing to callers
+    const req = "ref" in a && typeof a.ref === "string" ? { ...a, ref: toHelper(a.ref) } : a;
+    return this.call({ cmd: "act", ...req }).then(({ id: _, ...r }) => r);  // the request id means nothing to callers
   }
   close() { this.dead ??= "closed"; this.proc.removeAllListeners("exit"); this.proc.kill(); }
 }

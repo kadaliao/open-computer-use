@@ -134,6 +134,9 @@ export function unseenClaim(summary: string, goal: string, now: Observation, his
 // those whose element is still there unchanged (kept() below); anything else waits for the planner to look.
 const REFLESS = new Set(["key", "type", "menu", "open_app", "open_url", "find_text", "read_visual", "note", "done"]);
 const needsLook = (step: any) => typeof step.ref === "string" || !REFLESS.has(step.action);
+// Tab moves focus through fields of a screen the planner hasn't seen yet (a find bar, a dialog): that guesses its
+// layout, so after a screen change it waits for a look like a step with a ref.
+const movesFocus = (step: any) => step.action === "key" && /^(shift\+)?tab$/i.test(step.key ?? "");
 /**
  * Refs are stable, so a step planned on `plan` can still run on `now` when its element is there with the same
  * role and label, in the same window, no dialog came or went, and the screen changed little (select all, then press
@@ -321,9 +324,9 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
       for (const [k, step] of batch.entries()) {
         // After a screen change: steps without a ref run on the settled new screen, steps with one only if their
         // element was kept; otherwise the planner looks at the screen (just read, when it settled).
-        if (k > 0 && step.action !== "done" && (needsLook(step) ? !refsOk : unsettled)) {
+        if (k > 0 && step.action !== "done" && (needsLook(step) ? !refsOk : unsettled || (movesFocus(step) && !refsOk))) {
           if (stale) await look();
-          if (needsLook(step) && !kept(step, plan, cur)) { if (!unsettled) obs = cur; break; }
+          if ((needsLook(step) && !kept(step, plan, cur)) || movesFocus(step)) { if (!unsettled) obs = cur; break; }
         }
         const wait = lap();  // the gap after the previous step, and settling
         if (step.action === "done") {
