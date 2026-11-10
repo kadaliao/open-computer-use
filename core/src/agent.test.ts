@@ -1,28 +1,31 @@
 // The agent loop against a scripted fake app and a scripted planner: no helper, no network.
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Action, Element, Observation } from "./driver.ts";
 import { confirmed, runTask, timing, type Decide, type Driver } from "./agent.ts";
 import { decide } from "./policy.ts";
+import { waits } from "./screen.ts";
 import type { Step } from "./policy.ts";
 
 // Never touch the user's cache; short waits so the suite runs in a few seconds.
 const dir = mkdtempSync(join(tmpdir(), "ocu-test-"));
 process.env.OCU_CACHE_FILE = join(dir, "actions.json");
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
-Object.assign(timing, { poll: 10, quiet: 80, quietBrowser: 80, maxSettle: 600, stepGap: 0, turnGap: 0 });
+beforeEach(() => { Object.assign(waits, { poll: 10, quiet: 80, quietBrowser: 80, quietStep: 80, max: 600 }); timing.turnGap = 0; });
 
 /** A scripted app. Tests describe the screen as elements; `onAct` changes it. */
 class Fake implements Driver {
   log: string[] = [];
+  quiet: boolean[] = [];  // per read: was it a quiet (settle) read
   closed = false;
   constructor(public app: string, public window: string, public els: Element[],
     public onAct: (a: Action, f: Fake) => object | void = () => {}) {}
   el(ref: string) { return this.els.find((e) => e.ref === ref); }
-  async observe(): Promise<Observation> {
+  async observe(_app?: string, opts: { quiet?: boolean } = {}): Promise<Observation> {
     this.log.push("observe");
+    this.quiet.push(!!opts.quiet);
     return structuredClone({ app: this.app, window: this.window, elements: this.els });
   }
   async act(a: Action) {
@@ -62,8 +65,8 @@ function notes(lag = 0, newRef = "e1") {
   });
 }
 
-/** Calculator with a display that groups digits like the real one ("6,912"). */
-function calculator(display = "0") {
+/** Calculator with a display that groups digits like the real one ("6,912"). relabel: AC reads "清除" while there is input. */
+function calculator(display = "0", relabel = false) {
   const keys = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d, i) => el(`e${i + 1}`, "Button", d));
   const ops: Record<string, string> = { 加: "+", 乘: "*", 等于: "=", 全部清除: "C" };
   const opEls = Object.keys(ops).map((o, i) => el(`e${i + 20}`, "Button", o));
@@ -71,12 +74,13 @@ function calculator(display = "0") {
   let expr = "";
   return new Fake("计算器", "计算器", [shown, ...keys, ...opEls], (a, f) => {
     if (a.action !== "press") return;
-    const k = f.el(a.ref)!.label, op = ops[k];
+    const k = f.el(a.ref)!.label, op = k === "清除" ? "C" : ops[k];
     if (op === "C") expr = "";
     else if (op === "=") expr = String(Function(`return (${expr})`)());
     else expr += op ?? k;
     const last = expr.match(/[\d.]+$/)?.[0];  // an operator leaves the display alone
     if (last || op === "C") shown.label = Number(last ?? 0).toLocaleString("en-US");
+    if (relabel) f.els.find((e) => e.ref === "e20")!.label = expr ? "清除" : "全部清除";
   });
 }
 const press = (ref: string): Step => ({ action: "press", ref });
@@ -124,6 +128,58 @@ describe("batching past a screen change", () => {
     expect(r).toMatchObject({ ok: true, summary: "37 × 12 = 444", turns: 1 });
     const presses = f.log.map((x, i) => [x, i] as const).filter(([x]) => x.startsWith("press"));
     expect(f.log.slice(presses[0][1], presses.at(-1)![1]).includes("observe")).toBe(false);
+  });
+});
+
+describe("refs after a screen change", () => {
+  // TextEdit-like: select all changes nothing visible, bold ticks the box; "Save" opens a big sheet.
+  const editor = () => new Fake("文本编辑", "未命名", [el("e5", "CheckBox", "粗体"), el("e6", "Button", "存储"), el("e11", "TextArea", "")], (a, f) => {
+    const ref = (a as { ref?: string }).ref;
+    if (a.action === "type" && ref) f.el(ref)!.label += a.text;
+    if (a.action === "press" && ref === "e5") f.el("e5")!.state = ["checked"];
+    if (a.action === "press" && ref === "e6") f.els = [...f.els, ...Array.from({ length: 12 }, (_, i) => el(`e${30 + i}`, "Button", `sheet ${i}`))];
+    if (a.action === "key" && a.key === "cmd+r") f.el("e5")!.label = "Bold";
+  });
+
+  test("a step whose element is still there unchanged runs in the same batch", async () => {
+    const f = editor();
+    const p = planner([{ action: "type", ref: "e11", text: "ocu bold" } as Step, { action: "key", key: "cmd+a" }, press("e5")], [{ action: "done", summary: "bold" }]);
+    const r = await runTask("bold", { driver: f, decide: p.decide, noCache: true });
+    expect(r.ok).toBe(true);
+    expect(p.calls[0].history).toEqual([]);
+    expect(p.calls[1].history.length).toBe(3);  // all three ran in the first turn
+    expect(f.el("e5")!.state).toEqual(["checked"]);
+  });
+
+  test("after a big change, or when the element's label changed, the planner looks first", async () => {
+    const big = editor();
+    // (press after press is the keypad case and goes straight on, so the second step here is a set_value.)
+    const p1 = planner([press("e6"), { action: "set_value", ref: "e11", text: "x" }], [{ action: "done", summary: "x" }]);
+    await runTask("save", { driver: big, decide: p1.decide, noCache: true });
+    expect(big.log.filter((x) => x.startsWith("set_value")).length).toBe(0);
+    expect(p1.calls[1].obs.elements.length).toBeGreaterThan(10);  // planned on the screen with the sheet
+    const renamed = editor();
+    const p2 = planner([{ action: "key", key: "cmd+r" }, press("e5")], [{ action: "done", summary: "x" }]);
+    await runTask("rename", { driver: renamed, decide: p2.decide, noCache: true });
+    expect(renamed.log.filter((x) => x === "press e5").length).toBe(0);
+  });
+
+  test("settling reads are quiet after the first", async () => {
+    const f = notes(30);
+    const p = planner([press("e1"), { action: "type", text: "hello" }, { action: "done", summary: "s", expect: "hello" }]);
+    await runTask("x", { driver: f, decide: p.decide, noCache: true });
+    expect(f.quiet.filter((q) => q).length).toBeGreaterThan(f.quiet.filter((q) => !q).length);
+  });
+
+  test("a page that starts loading late after return is still waited for", async () => {
+    // set_value changes the screen first; the wait after return must not take that for the page load.
+    const f = new Fake("Safari浏览器", "Apple", [el("e3", "TextField", "智能搜索栏"), el("e4", "Text", "iPhone")], (a, f) => {
+      if (a.action === "set_value") f.el("e3")!.value = a.text;
+      if (a.action === "key") setTimeout(() => { f.window = "Example Domain"; f.els = [f.els[0], el("e9", "Text", "Example Domain")]; }, 50);
+    });
+    const p = planner([{ action: "set_value", ref: "e3", text: "example.com" }, { action: "key", key: "return" },
+      { action: "done", summary: "opened", expect: "Example Domain" }]);
+    expect(await runTask("open example.com", { driver: f, decide: p.decide, noCache: true })).toMatchObject({ ok: true, turns: 1 });
   });
 });
 
@@ -253,6 +309,18 @@ describe("action cache", () => {
     expect(r3).toMatchObject({ ok: true, summary: "37 × 13 = 481", turns: 1 });
     expect(f3.els[0].label).toBe("481");  // the keys were re-spelled for the new numbers
     expect(other.calls[0].history.at(-1)).toContain("replayed from a previous successful run");
+  });
+
+  test("a key whose label shows up only after earlier keys is found on a fresh read", async () => {
+    const f1 = calculator("0", true);
+    // Recorded as "Button 清除": the planner pressed it on the screen after the first key.
+    const first = planner([press("e2")], [press("e20"), press("e5"), press("e3"), press("e21"), { action: "done", summary: "42", expect: "42" }]);
+    expect(await runTask("clear test", { driver: f1, decide: first.decide })).toMatchObject({ ok: true, turns: 2 });
+    expect(JSON.stringify(JSON.parse(readFileSync(process.env.OCU_CACHE_FILE!, "utf8"))["[计算器] clear test"].steps)).toContain("Button 清除");
+    const f2 = calculator("0", true);
+    const r = await runTask("clear test", { driver: f2, decide: planner().decide });
+    expect(r).toMatchObject({ ok: true, turns: 0 });
+    expect(f2.els[0].label).toBe("42");
   });
 });
 

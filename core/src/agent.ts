@@ -1,43 +1,20 @@
-import { MacDriver, render, type Element, type Observation } from "./driver.ts";
+import { MacDriver, type Element, type Observation } from "./driver.ts";
 import { decide as planDecide, type ActStep, type Expect, type Step } from "./policy.ts";
-import { ask, locate } from "./vision.ts";
+import { ask, locate, VISION_MAX } from "./vision.ts";
+import { bigChange, changes, changesUI, gapAfter, settle, shape } from "./screen.ts";
 import * as cache from "./cache.ts";
 
 /** What the loop needs from the helper. Callers that already run one (the MCP server) pass it in; tests pass a fake. */
 export type Driver = Pick<MacDriver, "observe" | "act" | "screenshot">;
 export type Decide = typeof planDecide;
 
-/** Waits in ms. Mutable so tests can shorten them. */
+/** Waits in ms beyond settling (screen.ts waits). Mutable so tests can shorten them. */
 export const timing = {
-  poll: 100,          // between reads while waiting for the screen to settle
-  quiet: 600,         // an unchanged screen means "the action did nothing" only after this long,
-  quietBrowser: 1200, // or this long in a browser, where page loads start late
-  maxSettle: 2000,
-  stepGap: 80,        // between the steps of a batch
-  turnGap: 100,       // before reading the screen after steps that change it only a little (typing)
+  turnGap: 50,  // before reading the screen after steps that change it only a little (typing)
 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const isBrowser = (app = "") => /safari|chrome|edge|firefox|arc|浏览器/i.test(app);
-
-/**
- * Re-read the UI until it stops changing (page loaded, window opened), up to maxSettle.
- * `before` is the screen the last action ran on: while the screen still equals it the action may just be slow to
- * show, so "nothing changed" is accepted only after `quiet` ms. `enough` ends the wait early (expected text is up).
- */
-export async function settle(driver: Driver, before?: string, enough?: (o: Observation) => boolean): Promise<Observation> {
-  const t0 = performance.now();
-  let prev = await driver.observe(), stable = 0;
-  const quiet = isBrowser(prev.app) ? timing.quietBrowser : timing.quiet;
-  while (!enough?.(prev) && performance.now() - t0 < timing.maxSettle) {
-    const moved = before === undefined || render(prev) !== before;
-    if (moved ? stable >= 1 : stable >= 2 && performance.now() - t0 >= quiet) break;
-    await sleep(timing.poll);
-    const cur = await driver.observe();
-    stable = render(cur) === render(prev) ? stable + 1 : 0;
-    prev = cur;
-  }
-  return prev;
-}
+// The agent works in the frontmost app. Settling polls are quiet (no raising, no glow).
+const reader = (driver: Driver) => (quiet: boolean) => driver.observe(undefined, { quiet });
 
 // done{expect} is checked here instead of by another planner call. Text on these roles proves nothing:
 // controls name places you could go next, one-line fields echo what was typed into them.
@@ -45,7 +22,7 @@ const NO_PROOF = new Set(["Button", "MenuItem", "MenuBarItem", "MenuButton", "Li
   "PopUpButton", "Row", "Cell", "List", "Slider", "TextField", "SearchField", "ComboBox"]);
 // Case, width, line breaks and digit grouping ("6,912", "6 912" vs "6912") don't matter (NFKC turns no-break spaces into spaces).
 const norm = (s: string) => s.normalize("NFKC").toLowerCase().replace(/(\d)[,' ](?=\d{3}(?!\d))/g, "$1").replace(/\s+/g, " ").trim();
-const textOf = (e: Element) => [e.label, (e as { value?: unknown }).value].filter((v) => typeof v === "string" && v).join(" ");
+const textOf = (e: Element) => [e.label, e.value].filter(Boolean).join(" ");
 const content = (o: Observation) => (o.elements ?? []).filter((e) => !NO_PROOF.has(e.role)).map((e) => norm(textOf(e)));
 
 /**
@@ -72,12 +49,20 @@ export function proofOf(goal: string, done: { summary?: string; expect?: Expect 
   return all.filter((w) => !g.includes(norm(w)) && s.includes(norm(w)));
 }
 
-const UI_CHANGERS = ["press", "menu", "open_app", "open_url", "click_visual"];
-const changesUI = (step: any) => UI_CHANGERS.includes(step.action) ||
-  (step.action === "key" && (step.key.includes("+") || step.key === "return"));
-// After the screen changed, a batch goes on only with steps that don't point at an element of the old screen.
+// After the screen changed, a batch goes on with steps that don't point at an element of the old screen, and with
+// those whose element is still there unchanged (kept() below); anything else waits for the planner to look.
 const REFLESS = new Set(["key", "type", "menu", "open_app", "open_url", "find_text", "read_visual", "note", "done"]);
 const needsLook = (step: any) => typeof step.ref === "string" || !REFLESS.has(step.action);
+/**
+ * Refs are stable, so a step planned on `plan` can still run on `now` when its element is there with the same
+ * role and label, in the same window, and the screen changed little (select all, then press Bold). A dialog or
+ * another page is a big change: then the planner looks first.
+ */
+function kept(step: any, plan: Observation, now: Observation): boolean {
+  if (typeof step.ref !== "string" || now.error || !now.elements) return false;
+  const a = plan.elements.find((e) => e.ref === step.ref), b = now.elements.find((e) => e.ref === step.ref);
+  return !!a && !!b && a.role === b.role && a.label === b.label && !bigChange(changes(plan, now), now);
+}
 
 /**
  * Per-step timing. ms is the step's share of the run, so sums over steps add up: the first step of a turn carries
@@ -102,16 +87,20 @@ async function replay(driver: Driver, cached: cache.CachedStep[], history: strin
   const seen: Observation[] = [];
   for (const c of cached) {
     const lap = clock();
-    const obs = needSettle ? await settle(driver, before) : await driver.observe();
+    // Keypad-style press runs resolve on the same read: their refs stay put while the display changes. A label
+    // that only shows up after earlier keys (AC turning into C) gets one fresh read.
+    const reused = !needSettle && seen.length > 0;
+    let obs = needSettle ? await settle(reader(driver), { before, step: n > 0 }) : seen.at(-1) ?? await driver.observe(undefined, { quiet: true });
+    let ref = c.target ? cache.resolve(obs, c.target, c.nth) : null;
+    if (c.target && !ref && reused) { obs = await driver.observe(undefined, { quiet: true }); ref = cache.resolve(obs, c.target, c.nth); }
     seen.push(obs);
     const wait = lap();
     const step: any = { ...c.step };
     if (c.target) {
-      const ref = cache.resolve(obs, c.target, c.nth);
       if (!ref) { log(`[cache] stop: "${c.target}" not on screen`); break; }
       step.ref = ref;
     }
-    before = render(obs);
+    before = shape(obs);
     const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
     const s: StepLog = { tier: "cache", ...timed({ wait_ms: wait, act_ms: lap() }), step, target: res.target, error: res.error, via: res.via };
     steps.push(s);
@@ -129,7 +118,7 @@ async function replay(driver: Driver, cached: cache.CachedStep[], history: strin
 /** Screenshot fallback actions run here; everything else goes straight to the driver. */
 async function perform(driver: Driver, step: Step): Promise<{ ok?: boolean; error?: string; target?: string; via?: string; note?: string }> {
   if (step.action === "click_visual") {
-    const shot = await driver.screenshot();
+    const shot = await driver.screenshot(VISION_MAX);
     if (shot.error) return { error: shot.error };
     const p = await locate(shot, step.target).catch((e) => { throw new Error(String(e)); });
     if (!p) return { error: `vision model could not find "${step.target}"` };
@@ -137,7 +126,7 @@ async function perform(driver: Driver, step: Step): Promise<{ ok?: boolean; erro
     return { ...res, target: `Visual "${step.target}" @${Math.round(p.x)},${Math.round(p.y)}`, via: "vision" };
   }
   if (step.action === "read_visual") {
-    const shot = await driver.screenshot();
+    const shot = await driver.screenshot(VISION_MAX);
     if (shot.error) return { error: shot.error };
     return { ok: true, via: "vision", note: await ask(shot, step.question) };
   }
@@ -168,6 +157,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
   };
   try {
     const lap = clock();
+    const read = reader(driver);
     const start = await driver.observe();
     let firstObs = lap();
     let obs: Observation | undefined = start;  // the screen to plan on next, when already read
@@ -184,7 +174,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
       if (replayedAll && done && proof.length) {
         lap();
         const seen = [start, ...r.seen];
-        obs = await settle(driver, before, (o) => confirmed(proof, seen, o));
+        obs = await settle(read, { before, enough: (o) => confirmed(proof, seen, o) });
         needSettle = false;
         const ok = confirmed(proof, seen, obs);
         steps.push({ tier: "cache", ...timed({ wait_ms: lap() }), step: { action: "done", summary: done.summary, expect: done.expect }, ...(ok ? {} : { error: "not confirmed" }) });
@@ -197,11 +187,11 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
       const lap = clock();
       if (!obs) {
         if (!needSettle && i > 0) await sleep(timing.turnGap);
-        obs = needSettle ? await settle(driver, before) : await driver.observe();
+        obs = needSettle ? await settle(read, { before }) : await driver.observe();
       }
       const plan = obs;
       obs = undefined; needSettle = false; before = undefined;
-      const screen = render(plan);
+      const screen = shape(plan);
       let pending: { obs_ms?: number; model_ms?: number } = { obs_ms: lap() + firstObs };
       firstObs = 0;
       const { steps: batch, tier } = await decide(goal, history, plan);
@@ -214,16 +204,25 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         steps.push(entry);
         return entry;
       };
-      const seen = [plan];  // screens read during this batch, for the done{expect} check
-      let cur = plan;       // the latest of them
-      let refsOk = true;    // refs from `plan` still point where the planner thinks
-      let unsettled = false; // the screen changed since `cur` was read
-      // A step may run on the screen it was planned on, or, if it needs no ref, on the settled new one.
-      const blocked = (step: Step) => needsLook(step) && !refsOk;
-      const settling = (step: Step) => unsettled && step.action !== "done" && !needsLook(step);
+      const seen = [plan];   // screens read during this batch, for the done{expect} check
+      let cur = plan;        // the latest of them
+      let refsOk = true;     // refs from `plan` still point where the planner thinks (no change yet, or a keypad run)
+      let unsettled = false; // a screen-changing step ran and the screen hasn't visibly changed in a read since
+      let stale = false;     // some step ran since `cur` was read
+      // Wait for the new screen inside the batch. If it still looks as before, `unsettled` stays: the turn's own
+      // settle then keeps watching the full quiet time, so a late change isn't missed.
+      const look = async () => {
+        cur = await settle(read, { before: unsettled ? before : undefined, step: true });
+        seen.push(cur); stale = false;
+        if (shape(cur) !== before) unsettled = false;
+      };
       for (const [k, step] of batch.entries()) {
-        if (k > 0 && blocked(step)) break;  // it needs the new screen: the planner looks first
-        if (settling(step)) { cur = await settle(driver, before); seen.push(cur); unsettled = false; }
+        // After a screen change: steps without a ref run on the settled new screen, steps with one only if their
+        // element was kept; otherwise the planner looks at the screen (just read, when it settled).
+        if (k > 0 && step.action !== "done" && (needsLook(step) ? !refsOk : unsettled)) {
+          if (stale) await look();
+          if (needsLook(step) && !kept(step, plan, cur)) { if (!unsettled) obs = cur; break; }
+        }
         const wait = lap();  // the gap after the previous step, and settling
         if (step.action === "done") {
           // Right after looking at the screen, the planner's word is enough.
@@ -241,7 +240,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
             log(`[${i}] done not accepted: expect ${JSON.stringify(step.expect)} is not an answer`);
             break;
           }
-          const now = await settle(driver, unsettled ? before : undefined, (o) => confirmed(proof, seen, o));
+          const now = await settle(read, { before: unsettled ? before : undefined, enough: (o) => confirmed(proof, seen, o) });
           const ok = confirmed(proof, seen, now);
           const s = push({ step, ...(ok ? {} : { error: "not confirmed" }) }, { wait_ms: wait + lap() });
           if (ok) { log(`[${i}] done (${tier}, ${fmtTime(s)}ms, ${JSON.stringify(step.expect)} on screen): ${step.summary}`); return finish(true, step.summary, proof); }
@@ -270,11 +269,14 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
           break;
         }
         if (k === 0) lastAct = { key, screen };
-        const ranOn = render(cur);
+        // The screen this step runs on, for the wait after it: re-read it when typing changed it since the last read,
+        // or that change would pass for this step's effect.
+        if (changesUI(step) && stale && !unsettled) { cur = await read(true); stale = false; }
+        const ranOn = shape(cur);
         const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
         const s = push({ step, target: res.target, error: res.error, via: res.via }, { wait_ms: wait, act_ms: lap() });
         if (!res.error) {
-          // Refs are only valid on `plan`; a ref step never runs on another screen (see needsLook).
+          // A ref step runs on `plan`, or on a later screen where its element was kept (same ref, role, label).
           const ref = (step as any).ref;
           const at = ref ? cache.nthOf(plan, ref) : null;
           if (ref && !at) cacheable = false;
@@ -288,14 +290,15 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         log(`[${i}] ${tier} ${fmtTime(s)}ms ${line}`);
         if (res.error) break;
         if (step.action === "read_visual" || step.action === "find_text") break; // the planner needs the answer
+        stale = true;
         if (changesUI(step)) {
           unsettled = true; before = ranOn;
           // Consecutive presses (calculator keys, a Jev sequence) keep using the refs they were planned with.
           refsOk = refsOk && step.action === "press" && batch[k + 1]?.action === "press";
         }
-        // A short gap before the next step, unless it waits for the screen anyway or won't run.
-        const next = batch[k + 1];
-        if (next && next.action !== "done" && !blocked(next) && !settling(next) && timing.stepGap) await sleep(timing.stepGap);
+        // Keys and clicks are events the app handles a little later; accessibility actions are done already.
+        const gap = gapAfter(step, res);
+        if (gap && batch[k + 1] && batch[k + 1].action !== "done") await sleep(gap);
       }
       if (unsettled) needSettle = true;
     }

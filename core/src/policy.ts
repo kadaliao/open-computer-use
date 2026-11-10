@@ -16,11 +16,12 @@ const STATE = `After the label an element may show its state: [checked] (checkbo
 A checkbox without [checked] is off, a radio button without [selected] is not chosen. Read state from this list, not with read_visual.`;
 // What a batch may contain. The loop in agent.ts enforces the same rules: keep the two in step.
 const BATCH = `Send in one reply every step you can already predict, one JSON object per line. They run in order:
-- Steps with a ref act on the screen you were shown.
+- Steps with a ref act on the screen you were shown. Refs are stable: an element keeps its ref while it is on screen.
 - After a step that changes the screen (press, menu, open_app, open_url, a key combo or return), the batch waits for
-  the screen to settle and goes on only with steps that need no ref: key, type without ref, menu, open_app, open_url,
-  find_text, read_visual, note, done. The first step that needs a ref ends the batch; you then see the new screen.
-  A run of presses (calculator keys) is the exception: it keeps the refs you were shown.`;
+  the screen to settle, then goes on with steps that need no ref (key, type without ref, menu, open_app, open_url,
+  find_text, read_visual, note, done) and with steps whose element is still there unchanged after a small change
+  (select all, then press Bold). Any other step with a ref ends the batch; you then see the new screen.
+  A run of presses (calculator keys) goes straight on with the refs you were shown.`;
 const DONE = `Finishing: {"action":"done","summary":"...","expect":"..."}; summary is one short sentence with any answer the goal asks for.
 done means every part of the goal is achieved ("open X, then do Y" is done after Y, not after X).
 A reply that stops before the goal is achieved simply ends without done: you then see the new screen.
