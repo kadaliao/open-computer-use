@@ -1,20 +1,18 @@
 // Screenshot fallback: ask a vision grounding model where a described element is in the window image.
 // Works with any OpenAI-compatible vision endpoint. Default: StepFun step-gui (GUI grounding model).
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
 
-export type Shot = { path: string; x: number; y: number; w: number; h: number; px_w: number; px_h: number; error?: string };
+/** A window screenshot: PNG path, the window's frame in screen points, and the image's size in pixels. */
+export type Shot = { path: string; x: number; y: number; w: number; h: number; px_w: number; px_h: number; via?: string; error?: string };
 
 const env = process.env;
 export const VISION_MODEL = env.OCU_VISION_MODEL ?? "step-gui";
+/** Longest image side sent to vision models; pass it as screenshot(max) so the helper scales while capturing. */
+export const VISION_MAX = Number(env.OCU_VISION_MAX ?? 1280);
 
-/** Shrink to a model-friendly size; returns base64 PNG and its pixel size. */
-export function prepare(path: string, maxSide = Number(env.OCU_VISION_MAX ?? 1280)) {
-  const out = path.replace(/\.png$/, "-s.png");
-  execFileSync("sips", ["-Z", String(maxSide), path, "--out", out], { stdio: "ignore" });
-  const info = execFileSync("sips", ["-g", "pixelWidth", "-g", "pixelHeight", out]).toString();
-  const w = Number(info.match(/pixelWidth: (\d+)/)![1]), h = Number(info.match(/pixelHeight: (\d+)/)![1]);
-  return { b64: readFileSync(out).toString("base64"), w, h };
+/** The screenshot as base64 PNG with its pixel size. */
+export function image(shot: Shot) {
+  return { b64: readFileSync(shot.path).toString("base64"), w: shot.px_w, h: shot.px_h };
 }
 
 /** Parse the first coordinate pair from the reply: "(x,y)", "[x, y]", "<point>x y</point>", "x=.., y=..". */
@@ -29,7 +27,7 @@ export function parsePoint(text: string): [number, number] | null {
  * unless OCU_VISION_COORDS=pixels, in which case they are pixels of the image we sent.
  */
 export async function locate(shot: Shot, target: string, model = VISION_MODEL): Promise<{ x: number; y: number; raw: string } | null> {
-  const img = prepare(shot.path);
+  const img = image(shot);
   const r = await fetch(`${env.OCU_VISION_BASE_URL ?? "https://api.stepfun.com/v1"}/chat/completions`, {
     method: "POST", signal: AbortSignal.timeout(20000),
     headers: { "content-type": "application/json", authorization: `Bearer ${env.OCU_VISION_API_KEY ?? env.STEPFUN_API_KEY}` },
@@ -51,7 +49,7 @@ export async function locate(shot: Shot, target: string, model = VISION_MODEL): 
 
 /** Ask a vision model a question about the screenshot (for reading content the accessibility tree lacks). */
 export async function ask(shot: Shot, question: string, model = env.OCU_VISION_READ_MODEL ?? "step-1o-turbo-vision"): Promise<string> {
-  const img = prepare(shot.path);
+  const img = image(shot);
   const r = await fetch(`${env.OCU_VISION_BASE_URL ?? "https://api.stepfun.com/v1"}/chat/completions`, {
     method: "POST", signal: AbortSignal.timeout(30000),
     headers: { "content-type": "application/json", authorization: `Bearer ${env.OCU_VISION_API_KEY ?? env.STEPFUN_API_KEY}` },

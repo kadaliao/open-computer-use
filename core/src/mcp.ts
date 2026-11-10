@@ -11,11 +11,13 @@ if (!process.env.DEEPSEEK_API_KEY && !process.env.OCU_API_KEY && process.env.OCU
     if (m && /(_API_KEY|_BASE_URL)$|^OCU_/.test(m[1]) && !process.env[m[1]]) process.env[m[1]] = m[2];
   }
 }
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { MacDriver, render, type Element, type Observation } from "./driver.ts";
+import { MacDriver, render, type Observation } from "./driver.ts";
 import { runTask } from "./agent.ts";
+import { describe, runSteps, settle, shape } from "./screen.ts";
 
 const driver = new MacDriver();
 const env = process.env;
@@ -26,8 +28,15 @@ const hasPlanner = !!(env.OCU_API_KEY ?? env.DEEPSEEK_API_KEY);
 
 const INSTRUCTIONS = `Drive macOS apps through their accessibility tree. The loop:
 1. observe{app:"<name>"} once. Always name the app: the frontmost app is usually your own host.
-2. act on refs from the latest reply. Each act reply starts with what changed, then the full new screen.
-   Refs are renumbered on every reply: never reuse a ref from an older reply.
+2. act on refs. Refs are stable: an element keeps its ref as long as it is on screen, so a ref stays usable
+   until a reply marks it gone. Each act reply says what changed:
+   - "did not change": the screen is as before; all refs still hold.
+   - "changed: ... Only these lines changed": a short list, every other ref is unchanged and still valid:
+       + e45 Button "C"                       new element
+       ~ e3 Text "7"   (was: Text "0")        same element, new label, value or state
+       - e2 Button "AC"                       gone: don't use e2 any more
+   - otherwise the full screen (another window, a big change, and every few replies): use only refs in it.
+   State follows the label: [checked], [selected], [mixed], [disabled]; = "..." is a field's current value.
 3. Batch predictable steps with act{..., then:[...]} (e.g. typing a number on a keypad).
 Picking an action:
 - Text fields: set_value{ref,text} (or type{text,ref}); press return with key{key:"return"} if needed.
@@ -41,77 +50,45 @@ Picking an action:
 When stuck:
 - Watch "other windows of this app": an action may open several windows at once. Close extras in one batch or with a "close all" shortcut instead of one per step.
 - "did not change" means the action had no effect: pick a different element, try the menu or a shortcut. Don't repeat the same action.
+- "unknown ref": that element is no longer on screen; pick one from the latest reply.
 - Element missing or the list is sparse (canvas, games, some web views): ${hasVision ? "click_visual{target} / read_visual{question}, or " : ""}screenshot, then click_at{x,y} with the screen point it tells you how to compute.
 - Errors about Accessibility permission or a locked screen: stop and tell the user; retrying won't help.
 Finish by checking the result in the latest reply rather than assuming the action worked.`;
 
-const server = new McpServer({ name: "open-computer-use", version: "0.4.0" }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: "open-computer-use", version: "0.6.0" }, { instructions: INSTRUCTIONS });
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 let lastApp: string | undefined;
-let lastObs: Observation | undefined;  // what the caller last saw
+let lastObs: Observation | undefined;  // what the caller last saw (its refs are the ones it may use)
+let diffsInRow = 0;                    // change-only replies since the caller last got the full screen
 
-const key = (e: Element) => `${e.role} "${e.label}"`;
-/** Lead with what changed, so the caller doesn't have to compare two long lists itself. */
-function summarize(prev: Observation | undefined, cur: Observation): string {
-  if (!prev || prev.error || cur.error || !prev.elements || !cur.elements) return "";
-  if (prev.app !== cur.app || prev.window !== cur.window) return `changed: now in ${cur.app} | ${cur.window}\n`;
-  const before = new Map<string, number>();
-  for (const e of prev.elements) before.set(key(e), (before.get(key(e)) ?? 0) + 1);
-  const added: Element[] = [];
-  for (const e of cur.elements) {
-    const n = before.get(key(e)) ?? 0;
-    if (n > 0) before.set(key(e), n - 1); else added.push(e);
-  }
-  const gone = [...before.values()].reduce((a, b) => a + b, 0);
-  if (!added.length && !gone) return "";
-  const shown = added.slice(0, 12).map((e) => `  ${e.ref} ${key(e)}`).join("\n");
-  return `changed: ${added.length} new, ${gone} gone${added.length ? `\n${shown}${added.length > 12 ? "\n  ..." : ""}` : ""}\n`;
-}
+/** The screen part of a reply: what changed since the caller's last view (see screen.ts describe). */
 const show = (o: Observation) => {
-  const r = render(o);
-  const same = lastObs !== undefined && r === render(lastObs);
-  const head = same
-    ? "did not change: the action probably had no effect. Don't repeat it; try another element, menu{path}, a shortcut key, or screenshot.\n"
-    : summarize(lastObs, o);
+  const r = describe(lastObs, o, diffsInRow);
+  diffsInRow = r.kind === "diff" ? diffsInRow + 1 : r.kind === "full" ? 0 : diffsInRow;
   lastObs = o;
-  return `${head}\n${r}`;
+  return r.text;
 };
 
-/**
- * Re-read until the UI stops changing (window opened, page loaded). A web page often takes a few hundred ms
- * to start navigating, so when nothing has changed yet keep watching for a while before concluding the
- * action did nothing: a false "did not change" makes callers repeat the action.
- */
-async function settled(app?: string): Promise<Observation> {
-  // The app was quit (cmd+q): follow whatever is in front now instead of reporting "app not running".
-  const read = async () => {
-    const o = await driver.observe(app);
-    if (app && o.error?.startsWith("app not running")) { lastApp = app = undefined; return driver.observe(); }
-    return o;
-  };
-  const before = lastObs ? render(lastObs) : undefined;
-  const t0 = Date.now();
-  let prev = await read(), stable = 0;
-  // A change that holds for one more read is done. With no change at all, keep watching a little longer
-  // for late starters (page loads), but not so long that every no-op costs seconds.
-  const isBrowser = /safari|chrome|edge|firefox|arc|浏览器/i.test(prev.app ?? "");
-  while (Date.now() - t0 < 4000) {
-    await new Promise((r) => setTimeout(r, 100));
-    const cur = await read();
-    stable = render(cur) === render(prev) ? stable + 1 : 0;
-    prev = cur;
-    const moved = render(cur) !== before;
-    if (moved ? stable >= 1 : stable >= 2 && Date.now() - t0 >= (isBrowser ? 1200 : 600)) break;
-  }
-  return prev;
+/** One read of the caller's app. If it was quit (cmd+q), follow whatever is in front now instead of reporting "app not running". */
+async function read(quiet: boolean): Promise<Observation> {
+  const o = await driver.observe(lastApp, { quiet });
+  if (lastApp && o.error?.startsWith("app not running")) { lastApp = undefined; return driver.observe(undefined, { quiet }); }
+  return o;
 }
+/**
+ * Re-read until the UI stops changing (window opened, page loaded). A web page often takes a few hundred ms to
+ * start navigating, so an unchanged screen is watched a while before concluding the action did nothing: a false
+ * "did not change" makes callers repeat the action. step: a wait inside a batch, before its next step.
+ */
+const settled = (before: string | undefined, step = false) => settle(read, { before, step });
 
 server.tool("observe",
-  "List the elements of a macOS app's focused window as `ref Role \"label\"` lines (refs reset on every observe). " +
+  "List the elements of a macOS app's focused window as `ref Role \"label\"` lines, with state ([checked], [selected], = \"value\") where there is one. " +
+  "Refs are stable: an element keeps its ref while it stays on screen. " +
   "Pass `app` (name or bundle id) to target an app; its window is brought to the front. Otherwise the frontmost app (often your own terminal) is read. " +
   "The app is remembered for later calls.",
   { app: z.string().optional() },
-  async ({ app }) => { if (app) lastApp = app; lastObs = await driver.observe(lastApp); return text(render(lastObs)); });
+  async ({ app }) => { if (app) lastApp = app; lastObs = await driver.observe(lastApp); diffsInRow = 0; return text(render(lastObs)); });
 
 const one = {
   action: z.enum(["press", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at", "scroll"]),
@@ -127,54 +104,48 @@ async function run(a: any) {
   return driver.act(a.action === "find_text" ? { action: "find_text", query: a.text } : a);
 }
 server.tool("act",
-  "Perform one action, then return the updated screen (same format as observe). Refs come from the latest observe/act. " +
+  "Perform one action, then return what changed on screen (see the server instructions; first time or after a big change, the full screen). " +
   "press{ref, extend?} (on a table row: select it; extend adds to selection) | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key, repeat?} e.g. \"cmd+shift+g\", \"return\" | scroll{ref?, direction, amount?} | " +
   "open_app{name} | open_url{url} | menu{path:[\"File\",\"New Folder\"]} | find_text{text} search the whole window, incl. off-screen text | " +
   "click_at{x,y} global screen point. Keyboard actions bring the observed app forward first. " +
   "Work from refs: the reply already shows the new screen (menus and popups included), so don't take your own screenshots or guess coordinates; " +
   "use the screenshot tools only when the element really isn't listed.",
-  { ...one, then: z.array(z.object(one)).optional().describe("more actions to run right after, in order, using refs from the same screen (e.g. a run of keypad presses); stops at the first error") },
+  { ...one, then: z.array(z.object(one)).optional().describe("more actions to run right after, in order, with refs you already have (e.g. a run of keypad presses). " +
+    "After a step that changes the screen the batch waits for it to settle; a later step whose element has gone stops the batch with \"unknown ref\". Stops at the first error") },
   async ({ then, ...a }) => {
-    if (then?.length) {
-      const results = [];
-      for (const x of [a, ...then]) {
-        const r = await run(x); results.push(r);
-        if (r.error) break;
-        await new Promise((res) => setTimeout(res, 60));
-      }
-      return text(`results: ${JSON.stringify(results)}\n\n${show(await settled(lastApp))}`);
-    }
-    const res = await run(a);
-    if (a.action === "find_text") return text(JSON.stringify(res));
-    const obs = await settled(lastApp);
-    return text(`result: ${JSON.stringify(res)}\n\n${show(obs)}`);
+    const { results, screen } = await runSteps([a, ...(then ?? [])], run, (before) => settled(before, true), lastObs && shape(lastObs));
+    if (!then?.length && a.action === "find_text") return text(JSON.stringify(results[0]));
+    const head = then?.length ? `results: ${JSON.stringify(results)}` : `result: ${JSON.stringify(results[0])}`;
+    return text(`${head}\n\n${show(await settled(screen))}`);
   });
 
 if (hasVision) server.tool("click_visual", "Screenshot fallback for apps with little accessibility info (canvas, games, some Electron apps): a vision model finds the described element and clicks it.",
   { target: z.string() }, async ({ target }) => {
-    const { locate } = await import("./vision.ts");
+    const { locate, VISION_MAX } = await import("./vision.ts");
     await driver.observe(lastApp);
-    const shot = await driver.screenshot();
-    if ((shot as any).error) return text(`screenshot failed: ${(shot as any).error}`);
+    const shot = await driver.screenshot(VISION_MAX);
+    if (shot.error) return text(`screenshot failed: ${shot.error}`);
     const p = await locate(shot, target);
     if (!p) return text(`not found: ${target}`);
     const res = await driver.act({ action: "click_at", x: p.x, y: p.y });
-    return text(`result: ${JSON.stringify(res)}\n\n${show(await settled(lastApp))}`);
+    return text(`result: ${JSON.stringify(res)}\n\n${show(await settled(lastObs ? shape(lastObs) : undefined))}`);
   });
 
 if (hasVision) server.tool("read_visual", "Screenshot fallback: ask a vision model a question about the observed app's window.",
   { question: z.string() }, async ({ question }) => {
-    const { ask } = await import("./vision.ts");
+    const { ask, VISION_MAX } = await import("./vision.ts");
     await driver.observe(lastApp);
-    return text(await ask(await driver.screenshot(), question));
+    return text(await ask(await driver.screenshot(VISION_MAX), question));
   });
 
 if (hasPlanner) server.tool("run_task",
   "Hand a whole goal to the built-in agent (its own planner model, plus a cache that replays tasks it has done before). " +
-  "Use when you'd rather not spend your own steps; returns a summary and the step log.",
+  "Use when you'd rather not spend your own steps; returns a summary and the step log. Observe again afterwards: the screen has changed.",
   { goal: z.string() }, async ({ goal }) => {
-    const r = await runTask(goal);
-    return text(JSON.stringify({ ok: r.ok, summary: r.summary, steps: r.steps.length, tiers: [...new Set(r.steps.map((s) => s.tier))] }));
+    // Same helper as the other tools: no second process, and refs stay one numbering.
+    const r = await runTask(goal, { driver });
+    lastObs = undefined; diffsInRow = 0;  // the caller hasn't seen what the agent left on screen
+    return text(JSON.stringify({ ok: r.ok, summary: r.summary, steps: r.steps.length, planner_calls: r.turns, tiers: [...new Set(r.steps.map((s) => s.tier))] }));
   });
 
 server.tool("screenshot",
@@ -182,14 +153,12 @@ server.tool("screenshot",
   "To click something you see in it, call act{action:\"click_at\"} with the screen point given in the reply.",
   {}, async () => {
     await driver.observe(lastApp);
-    const shot = await driver.screenshot();
+    const shot = await driver.screenshot(1280);  // the helper scales while capturing (shrink only)
     if (shot.error) return text(`screenshot failed: ${shot.error}`);
-    const { prepare } = await import("./vision.ts");
-    const img = prepare(shot.path, Math.min(1280, Math.max(shot.px_w, shot.px_h)));  // shrink only
-    const sx = shot.w / img.w, sy = shot.h / img.h;
+    const sx = shot.w / shot.px_w, sy = shot.h / shot.px_h;
     return { content: [
-      { type: "image" as const, data: img.b64, mimeType: "image/png" },
-      { type: "text" as const, text: `Image is ${img.w}x${img.h}. Image pixel (px,py) is screen point x = ${shot.x} + px*${sx.toFixed(4)}, y = ${shot.y} + py*${sy.toFixed(4)}.` },
+      { type: "image" as const, data: readFileSync(shot.path).toString("base64"), mimeType: "image/png" },
+      { type: "text" as const, text: `Image is ${shot.px_w}x${shot.px_h}. Image pixel (px,py) is screen point x = ${shot.x} + px*${sx.toFixed(4)}, y = ${shot.y} + py*${sy.toFixed(4)}.` },
     ] };
   });
 
