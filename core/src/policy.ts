@@ -153,8 +153,11 @@ async function jevDone(goal: string, history: string[], obs: Observation, signal
 // - Jev press mode (OCU_JEV_PRESS=1): a confident Jev press wins unless the planner lands within a short grace.
 // - Jev done check: if Jev is confident the goal is met and the planner wants to keep acting,
 //   ask the planner once more with that hint, so it wraps up instead of wandering.
+//   The judge runs alongside the planner; once the planner has answered it gets only DONE_WAIT_MS more,
+//   so a slow judge can't add seconds to every turn.
 const GRACE_MS = Number(env.OCU_PLANNER_GRACE_MS ?? 400);
 const DONE_MIN = Number(env.OCU_JEV_DONE_MIN ?? 0.9);
+const DONE_WAIT_MS = Number(env.OCU_JEV_DONE_WAIT_MS ?? 300);
 export async function decide(goal: string, history: string[], obs: Observation): Promise<{ steps: Step[]; tier: string }> {
   const user = `goal: ${goal}\nhistory:\n${history.join("\n") || "(none)"}\n\nscreen:\n${render(obs)}`;
   const msgs: Msg[] = [{ role: "system", content: SYSTEM }, { role: "user", content: user }];
@@ -174,11 +177,15 @@ export async function decide(goal: string, history: string[], obs: Observation):
   }
 
   const steps = await plan;
-  if (steps[0]?.action === "done") return { steps, tier: "planner" };
-  const pDone = await doneP;
+  if (steps[0]?.action === "done") { ctl.abort(); return { steps, tier: "planner" }; }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pDone = await Promise.race([doneP, new Promise<number>((r) => { timer = setTimeout(() => r(0), DONE_WAIT_MS); })]);
+  clearTimeout(timer);
+  ctl.abort();  // the judge's request, if it is still running
   if (pDone < DONE_MIN) return { steps, tier: "planner" };
   const hint = `${user}\n\nNote: a verifier is ${Math.round(pDone * 100)}% sure the goal is already achieved on this screen. ` +
     `If it is, reply {"action":"done","summary":"..."} (include any answer the goal asks for); otherwise continue.`;
   const again = await planner([{ role: "system", content: SYSTEM }, { role: "user", content: hint }]).catch(() => steps);
-  return { steps: again, tier: again[0]?.action === "done" ? "jev-done" : "planner" };
+  // "planner+jev": a second planner call that didn't end the task, i.e. a round trip the judge cost.
+  return { steps: again, tier: again[0]?.action === "done" ? "jev-done" : "planner+jev" };
 }
