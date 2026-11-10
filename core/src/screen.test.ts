@@ -130,6 +130,19 @@ group("settle", () => {
     expect(performance.now() - step.t0).toBeLessThan(110);
   });
 
+  test("a slider that moves by itself (a playing video) doesn't keep the screen from settling", async () => {
+    let t = 0;
+    const read = async () => scr([el("e1", "Slider", "播放位置", { value: String(t++) }), el("e2", "Button", "暂停")], "Video", 4, "QuickTime Player");
+    const t0 = performance.now();
+    await settle(read);
+    expect(performance.now() - t0).toBeLessThan(100);  // not the 600 ms maximum
+    // The reply still reports a slider that moved (here as the full list: two lines is a small screen).
+    const a = await read(), b = await read();
+    const r = describe(a, b);
+    expect(r.kind).not.toBe("same");
+    expect(r.text).toContain(`Slider "播放位置" = "${b.elements[0].value}"`);
+  });
+
   test("stops as soon as `enough` holds", async () => {
     const a = app(0);
     await settle(a.read, { before, enough: (o) => o.elements[0].label === "7" });

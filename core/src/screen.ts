@@ -8,12 +8,17 @@ export const isBrowser = (app = "") => /safari|chrome|edge|firefox|arc|浏览器
 
 /** An element's line without its ref. */
 const line = (e: Element) => renderElement(e).slice(e.ref.length + 1);
+const lines = (o: Observation, f: (e: Element) => string) =>
+  o.error || !o.elements ? `error: ${o.error ?? ""}` : `${renderHead(o)}\n${o.elements.map(f).join("\n")}`;
 /**
- * The screen without refs. Two reads that match here show the same thing, even from an app that hands out new
- * element objects (so new refs) on every read; comparing full renders would never see such a screen settle.
+ * The screen as settling compares it: without refs, so an app that hands out new element objects (new refs) on every
+ * read can still be seen to settle, and without slider values, which move by themselves (a playing video's
+ * position) and would keep a screen from ever settling. A slider an action moved shows in the reply all the same
+ * (describe compares exact lines); the wait for it just runs the quiet time.
  */
-export const shape = (o: Observation) =>
-  o.error || !o.elements ? `error: ${o.error ?? ""}` : `${renderHead(o)}\n${o.elements.map(line).join("\n")}`;
+export const shape = (o: Observation) => lines(o, (e) => (e.role === "Slider" && e.value !== undefined ? line({ ...e, value: undefined }) : line(e)));
+/** Every line without refs, values included: "did the screen change at all". */
+const exact = (o: Observation) => lines(o, line);
 
 /** Waits in ms. Mutable so tests can shorten them. */
 export const waits = {
@@ -126,7 +131,7 @@ export function describe(prev: Observation | undefined, cur: Observation, diffsI
   const c = changes(prev, cur);
   // Before the no-change test: a new window can look exactly like the old one ("Untitled", empty).
   if (c.other) return full(`changed: now in ${cur.app} | ${cur.window}${cur.window === prev.window && cur.app === prev.app ? " (another window)" : ""}. Use only the refs below.`);
-  if (shape(prev) === shape(cur)) {
+  if (exact(prev) === exact(cur)) {
     if (render(prev) === render(cur)) return { kind: "same", text: `${NO_EFFECT}\nThe screen is the same as in your last reply, and all its refs still hold.\n${renderHead(cur)}` };
     return full(`${NO_EFFECT}\nThis app renumbered its elements: use only the refs below.`);
   }
