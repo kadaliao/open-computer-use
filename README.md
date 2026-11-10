@@ -72,7 +72,7 @@ Measured: Claude Code (Sonnet) computed 789 × 36 on Calculator in 4 turns, 19 s
 ## Built-in agent (`ocu run`)
 The planner (DeepSeek by default) sends a batch of steps per turn; each round trip costs about a second, so the loop tries to need few of them:
 - After a step that changes the screen, the batch waits for the screen to settle and goes on with steps that need no ref (keys, typing into the focused field, menus, opening apps or URLs, find_text) and with steps whose element is still there unchanged after a small change (select all, then Bold). Anything else ends the batch and the planner looks at the new screen.
-- A batch may end with `done` plus `expect`, a text that only appears once the goal is achieved (the new window title, the calculator's result, the start of the typed text). The loop checks for it locally, in the window title or in content that was not on screen before the batch, and finishes without another model call. Controls and one-line fields don't count, and for questions the expected text must be the answer in the summary, not words of the goal. Without `expect`, `done` needs a look at the screen first.
+- A batch may end with `done` plus `expect`, a text that only appears once the goal is achieved (the new window title, the calculator's result, the start of the typed text). The loop checks for it locally, in the window title or in content that was not on screen before the batch, and finishes without another model call. Numbers and words match as whole tokens ("444" is not in "4,440"). Controls and one-line fields don't count; text the batch typed counts only when typing was its last step and a text area now holds exactly that text (an error message that repeats it is no proof); a window that came up at the end sends the turn to the planner. For questions the expected text must be the answer in the summary, not words of the goal, and a summary may not state numbers or quoted names that are neither in the goal, on the screen nor in earlier reads. When in doubt the planner looks. Without `expect`, `done` needs a look at the screen first.
 - Each step logs observe, model, wait and action time; `ocu run` prints the split at the end.
 
 ## Action cache
@@ -80,7 +80,7 @@ Successful runs are saved as "goal pattern → steps", keyed by the app that was
 - Quoted strings and numbers in the goal become parameters, so `算 37 乘以 12` replays for `算 906 乘以 7`. Keypad presses that spell a parameter are re-spelled with the new value.
 - Elements are stored by role and label, and resolved to fresh refs on replay.
 - After replay the planner checks the screen once. If it has to fix anything, the entry is dropped and the next run records afresh.
-- A run that ended with `done` + `expect` also stores its summary and expected text: a replay that brings the text on screen finishes without any model call.
+- A run whose `done` + `expect` was the goal's own text (a parameter: the note's content, a name) stores that expect: a replay that brings it on screen finishes without any model call. Results, counts or titles read off the old screen are never replayed; the planner checks.
 - Runs that read content (find_text / read_visual / note) are not cached, because their results change.
 - The benchmark disables the cache unless `OCU_CACHE=1`.
 
