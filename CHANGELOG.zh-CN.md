@@ -6,6 +6,15 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 ## [未发布]
 
+## [0.7.1] - 2026-11-16
+
+修了 `open` 的一个问题，加了 Homebrew formula，并重跑了和 agent-desktop 的对比：同一个模型跑同样的四个任务，ocu 用了 84 秒、29 次工具调用、27 万输入 token，agent-desktop 用了 173 秒、73 次调用、214.5 万 token。详见[基准测试](docs/benchmarks.zh-CN.md#和-agent-desktop-对比)。
+
+### 新增
+
+- `brew install kadaliao/tap/ocu`（Apple 芯片）。
+- 用 0.7.0 重跑的 agent-desktop 对比，写进了 `docs/benchmarks.md` 和 README。访达任务里，ocu 从 22.6 秒、6.5 次工具调用外加一张截图，变成 9.4 秒、3 次调用、不用截图。
+
 ### 修复
 
 - 对没有自带打开动作的行（比如活动监视器里的进程）用 `open`，现在会双击它。以前发的是 cmd+down，只有文件列表才认。
@@ -137,7 +146,8 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 第一个版本：以辅助功能为主的 macOS computer-use agent，包含 Swift helper、TypeScript core、命令行和 MCP 服务。
 
-[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...HEAD
+[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kadaliao/open-computer-use/compare/v0.4.3...v0.5.0

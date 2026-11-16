@@ -58,7 +58,12 @@ version may change the screen format or tool behavior, and the changelog says ho
    ```
 
    Release notes: one or two sentences on what the release is about, the measured
-   numbers if it is a speed release, the user-visible changes, behavior changes for MCP
-   callers, known limits, and the install line:
+   numbers if it is a speed release, the latest comparison with agent-desktop (the
+   totals, with a link to [benchmarks](benchmarks.md#compared-with-agent-desktop)), the
+   user-visible changes, behavior changes for MCP callers, known limits, and the install
+   lines:
 
-       Install: `tar xzf ocu-v0.7.0-macos-arm64.tar.gz && sh ocu-v0.7.0-macos-arm64/install.sh`
+       Install: `brew install kadaliao/tap/ocu`, or
+       `tar xzf ocu-v0.7.0-macos-arm64.tar.gz && sh ocu-v0.7.0-macos-arm64/install.sh`
+9. **Update Homebrew.** `gh workflow run bump.yml -R kadaliao/homebrew-tap` moves the
+   `ocu` formula to the new release at once (it also runs every 6 hours).

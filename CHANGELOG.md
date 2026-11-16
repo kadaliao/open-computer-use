@@ -9,6 +9,20 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-16
+
+A fix for `open`, a Homebrew formula, and the comparison with agent-desktop run again:
+with the same model on the same four tasks, ocu took 84 s, 29 tool calls and 270k input
+tokens, agent-desktop 173 s, 73 calls and 2,145k tokens. See
+[benchmarks](docs/benchmarks.md#compared-with-agent-desktop).
+
+### Added
+
+- `brew install kadaliao/tap/ocu` (Apple silicon).
+- The comparison with agent-desktop, run again with 0.7.0, in `docs/benchmarks.md` and
+  the README. In the Finder task ocu went from 22.6 s and 6.5 tool calls with a
+  screenshot to 9.4 s and 3 calls with none.
+
 ### Fixed
 
 - `open` on a row that has no open action of its own (a process in Activity Monitor)
@@ -174,7 +188,8 @@ planner calls each, against 20/22 at 9.8 s and 4 calls for 0.5.0. See
 First release: an accessibility-first computer-use agent for macOS, with a Swift helper,
 a TypeScript core, a CLI and an MCP server.
 
-[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kadaliao/open-computer-use/compare/v0.4.3...v0.5.0

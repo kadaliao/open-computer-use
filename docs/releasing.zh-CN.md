@@ -49,6 +49,8 @@
      --title v0.7.0 --notes-file notes.md
    ```
 
-   Release 说明（英文）包括：一两句话说明这个版本主要做了什么；如果是提速版本，附上实测数字；用户能感知的改动；对 MCP 调用方的行为变化；已知限制；以及安装命令：
+   Release 说明（英文）包括：一两句话说明这个版本主要做了什么；如果是提速版本，附上实测数字；最近一次和 agent-desktop 的对比（合计数字，加上[基准测试](benchmarks.zh-CN.md#和-agent-desktop-对比)的链接）；用户能感知的改动；对 MCP 调用方的行为变化；已知限制；以及安装命令：
 
-       Install: `tar xzf ocu-v0.7.0-macos-arm64.tar.gz && sh ocu-v0.7.0-macos-arm64/install.sh`
+       Install: `brew install kadaliao/tap/ocu`, or
+       `tar xzf ocu-v0.7.0-macos-arm64.tar.gz && sh ocu-v0.7.0-macos-arm64/install.sh`
+9. **更新 Homebrew。** `gh workflow run bump.yml -R kadaliao/homebrew-tap` 让 `ocu` 的 formula 马上跟到新版本（不跑也会每 6 小时自动更新一次）。

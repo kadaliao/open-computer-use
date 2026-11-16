@@ -41,6 +41,9 @@ open-computer-use（`ocu`）读取 Mac 应用的辅助功能树（accessibility 
   Claude Code 在计算器里算 789 × 36，用批量 4 轮、19 秒；不用批量要 11 轮、45 秒。
 - **快。** helper 里一次按下约 3 ms，读一个窗口 25–90 ms。内置 agent 22 个基准任务全部通过，
   每个任务约 4 秒、2 次规划模型调用（[基准测试](docs/benchmarks.zh-CN.md)）。
+- **比返回 JSON 树的工具省调用、省 token。** 同一个模型跑同样的四个任务，ocu 0.7.0 用了 84 秒、
+  29 次工具调用、27 万输入 token；agent-desktop 1.3.1 用了 173 秒、73 次调用、214.5 万 token。
+  两边 8 次都通过（[对比](docs/benchmarks.zh-CN.md#和-agent-desktop-对比)）。
 - **截图兜底。** 对画布类应用、游戏和部分 Electron 应用，视觉模型可以定位并点击辅助功能树里没有的东西。
   这一项是可选的。
 - **动作缓存。** 内置 agent 会保存成功过的任务，下次换了数字或引号里的文字也能直接重放，不调用模型。
@@ -55,6 +58,15 @@ open-computer-use（`ocu`）读取 Mac 应用的辅助功能树（accessibility 
 - 只有 `ocu run` 和可选的视觉工具需要模型 key，见[配置](docs/configuration.zh-CN.md)。
 
 ## 安装
+
+用 Homebrew：
+
+```sh
+brew install kadaliao/tap/ocu
+```
+
+Homebrew 装的那份在 `/opt/homebrew/opt/ocu/bin/ocu`，MCP 的 command 就填这个路径。
+或者用发布包：
 
 ```sh
 gh release download -R kadaliao/open-computer-use -p '*-macos-arm64.tar.gz'

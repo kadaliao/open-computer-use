@@ -58,7 +58,7 @@ When stuck:
 - Errors about Accessibility permission or a locked screen: stop and tell the user; retrying won't help.
 Finish by checking the result in the latest reply rather than assuming the action worked.`;
 
-const server = new McpServer({ name: "open-computer-use", version: "0.7.0" }, { instructions: INSTRUCTIONS });
+const server = new McpServer({ name: "open-computer-use", version: "0.7.1" }, { instructions: INSTRUCTIONS });
 const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 let lastApp: string | undefined;
 let lastObs: Observation | undefined;  // what the caller last saw (its refs are the ones it may use)

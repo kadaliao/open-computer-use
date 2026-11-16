@@ -31,6 +31,10 @@ silicon only. Releases are built by hand on the maintainer's Mac with
 - The maintainer's tap `kadaliao/homebrew-tap` already serves other tools (formulae
   `sessift`, `smd`, `tizi`). It has a `bump.yml` workflow that updates formulae to new
   releases, run by hand or every 6 hours.
+- Since 0.7.0 the tap has `Formula/ocu.rb` (Apple silicon only, `ocu` and `ocu-mac` in
+  `libexec`, a usage-line test because there is no `--version` yet), and the README and
+  releasing pages mention it. Step 3 below is left with the Intel archive and the
+  `--version` test.
 
 ## Plan
 

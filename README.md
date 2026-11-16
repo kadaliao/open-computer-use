@@ -47,6 +47,10 @@ it what changed. You can use it in two ways:
 - **Fast.** A press takes about 3 ms in the helper and reading a window 25–90 ms. The
   built-in agent passes 22 of 22 benchmark tasks at about 4 s and 2 planner calls each
   ([benchmarks](docs/benchmarks.md)).
+- **Fewer calls and tokens than a tree-of-JSON tool.** With the same model on the same
+  four tasks, ocu 0.7.0 took 84 s, 29 tool calls and 270k input tokens; agent-desktop
+  1.3.1 took 173 s, 73 calls and 2,145k tokens. Both passed all 8 runs
+  ([comparison](docs/benchmarks.md#compared-with-agent-desktop)).
 - **Screenshot fallback.** For canvas apps, games and some Electron apps, a vision model
   can locate and click what the accessibility tree doesn't list. This is optional.
 - **Action cache.** The built-in agent saves tasks that worked and replays them, with new
@@ -64,6 +68,15 @@ it what changed. You can use it in two ways:
   [configuration](docs/configuration.md).
 
 ## Install
+
+With Homebrew:
+
+```sh
+brew install kadaliao/tap/ocu
+```
+
+Homebrew's copy lives at `/opt/homebrew/opt/ocu/bin/ocu`; use that path as the MCP
+command. Or from the release archive:
 
 ```sh
 gh release download -R kadaliao/open-computer-use -p '*-macos-arm64.tar.gz'
