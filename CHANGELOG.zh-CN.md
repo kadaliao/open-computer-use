@@ -6,6 +6,16 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 ## [未发布]
 
+### 修复
+
+- 元素报出的坐标是 NaN 或无穷大时，helper 不再崩溃（在系统设置切换页面时遇到过）。
+- 目标里第二步的名字没加引号时（比如一个叫 `inner-x1` 的文件夹），内置 agent 不会再在做完第一步后就接受 `done`。
+
+### 变更
+
+- `docs/benchmarks.md` 只保留最新一次测量；和 agent-desktop 的对比改成了一张图，README 里也放了。
+- 基准测试会关掉自己打开的 Safari 标签页，检查结果前会等还在加载的页面，在英文系统上也能正常清理。
+
 ## [0.7.1] - 2026-11-16
 
 修了 `open` 的一个问题，加了 Homebrew formula，并重跑了和 agent-desktop 的对比：同一个模型跑同样的四个任务，ocu 用了 84 秒、29 次工具调用、27 万输入 token，agent-desktop 用了 173 秒、73 次调用、214.5 万 token。详见[基准测试](docs/benchmarks.zh-CN.md#和-agent-desktop-对比)。

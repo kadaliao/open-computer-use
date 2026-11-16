@@ -60,8 +60,8 @@ The per-task numbers, the setup and the limits of the test are in
   waits for it to settle. Claude Code computed 789 × 36 on Calculator in 4 turns and 19 s
   with batching, 11 turns and 45 s without.
 - **Fast.** A press takes a few milliseconds in the helper and reading a window
-  30–120 ms. The built-in agent passes 25 of 26 benchmark tasks at 4–5 s and 2–3 planner
-  calls each ([benchmarks](docs/benchmarks.md#ocu-on-its-own)).
+  30–130 ms. The built-in agent passes 25 or 26 of its 26 benchmark tasks at about 5 s
+  and 3 planner calls each ([benchmarks](docs/benchmarks.md#ocu-on-its-own)).
 - **Screenshot fallback.** For canvas apps, games and some Electron apps, a vision model
   can locate and click what the accessibility tree doesn't list. This is optional.
 - **Action cache.** The built-in agent saves tasks that worked and replays them, with new

@@ -9,6 +9,20 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ## [Unreleased]
 
+### Fixed
+
+- The helper no longer crashes when an element reports a frame with NaN or infinite
+  numbers (seen in System Settings during a page change).
+- The built-in agent no longer accepts `done` after the first of two steps when the
+  goal names the second without quotes (for example a folder called `inner-x1`).
+
+### Changed
+
+- `docs/benchmarks.md` keeps only the latest measurements, and the comparison with
+  agent-desktop is a chart, also shown in the README.
+- The benchmark closes the Safari tabs it opens, waits for a page that is still
+  loading before it checks the outcome, and cleans up on an English system too.
+
 ## [0.7.1] - 2026-11-16
 
 A fix for `open`, a Homebrew formula, and the comparison with agent-desktop run again:

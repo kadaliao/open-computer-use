@@ -40,6 +40,13 @@ for (const t of tasks.filter(pick)) {
   rows.push({ id: t.id, pass, steps: r.steps.length, turns: r.turns, fast, total_ms: total, time, summary: r.summary, log: r.steps });
   console.log(`${pass ? "PASS" : "FAIL"} ${t.id}  ${r.steps.length} steps, ${r.turns} planner calls (${fast} by Jev)  ${(total / 1000).toFixed(1)}s` +
     `  [observe ${time.obs} model ${time.model} wait ${time.wait} act ${time.act} ms]`);
+  // Each Safari task's setup opens a tab. Close it again: dozens of leftover tabs slow Safari's accessibility
+  // down until pages read empty. Done through the helper, since Apple Events to Safari need their own permission.
+  if (t.setup?.includes("open -a Safari")) {
+    const d = new MacDriver();
+    try { await d.observe("Safari"); await d.act({ action: "key", key: "cmd+w" }); } catch {}
+    d.close();
+  }
   // A cleanup that fails leaves its document or folder for the next task to trip over: say so.
   if (t.cleanup && !sh(t.cleanup)) console.log(`  cleanup failed for ${t.id}`);
 }
