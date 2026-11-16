@@ -1,0 +1,62 @@
+name: Bug report / 问题反馈
+description: Something doesn't work, or an app isn't handled well. / 有功能不正常，或者某个应用不好用。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Screen text, screenshots and the action cache show what was on your screen. Remove anything private before posting. Security problems go to **Security → Report a vulnerability** (see SECURITY.md).
+        屏幕文字、截图和动作缓存里有你屏幕上的内容，发之前请抹掉隐私信息。安全问题请走 **Security → Report a vulnerability**（见 SECURITY.md）。
+  - type: input
+    id: version
+    attributes:
+      label: ocu version / ocu 版本
+      description: Release tag, or `git rev-parse --short HEAD` for a source checkout. / 发布版本号；源码运行的话填 `git rev-parse --short HEAD`。
+      placeholder: "v0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac / macOS 版本和机型
+      placeholder: "26.1, Mac mini M2"
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you ran it / 运行方式
+      options:
+        - ocu run (built-in agent / 内置 agent)
+        - MCP
+        - ocu observe / doctor / cache
+        - Benchmark / 基准测试
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: MCP host and model, if any / MCP 宿主和模型（如有）
+      placeholder: "Claude Code (Sonnet), DeepSeek Harness, Cursor…"
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `ocu doctor` / `ocu doctor` 的输出
+      render: text
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 发生了什么
+      description: The goal or the tool calls, the app, and what you saw. / 目标或工具调用、哪个应用、看到了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected / 期望的结果
+  - type: textarea
+    id: log
+    attributes:
+      label: Log or screen / 日志或屏幕内容
+      description: The `ocu run` step log, or `ocu observe <app>` output. / `ocu run` 的步骤日志，或 `ocu observe <应用>` 的输出。
+      render: text

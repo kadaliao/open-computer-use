@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security problem / 安全问题
+    url: https://github.com/kadaliao/open-computer-use/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue. / 漏洞请私下报告，不要发公开 issue。
+  - name: Troubleshooting / 故障排查
+    url: https://github.com/kadaliao/open-computer-use/blob/master/docs/troubleshooting.md
+    about: Permissions, common errors and known limits. / 权限、常见错误和已知限制。

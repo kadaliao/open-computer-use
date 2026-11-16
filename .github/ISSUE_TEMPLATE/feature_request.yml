@@ -1,0 +1,19 @@
+name: Feature request / 功能建议
+description: An idea for the MCP tools, the built-in agent or the command line. / 对 MCP 工具、内置 agent 或命令行的想法。
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem / 想解决什么问题
+      description: What were you trying to do, in which app? / 你当时想在哪个应用里做什么？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like / 希望怎么做
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead / 现在是怎么绕过去的

@@ -10,6 +10,6 @@ rm -rf "$OUT" && mkdir -p "$OUT"
 cp mac/.build/release/ocu-mac "$OUT/"
 (cd core && bun install --frozen-lockfile >/dev/null && bun build src/cli.ts --compile --minify --outfile "../$OUT/ocu")
 cp scripts/install.sh "$OUT/"
-cp README.md "$OUT/"
+cp README.md README.zh-CN.md LICENSE "$OUT/"
 tar -C dist -czf "$OUT.tar.gz" "$(basename "$OUT")"
 echo "$OUT.tar.gz"
