@@ -129,9 +129,32 @@ input tokens and $1.35. Costs are API prices.
 
 **Where agent-desktop did better.** In Finder's column view it opened folders by
 clicking them. ocu's `press` on a file name there did nothing, so the model fell back to
-a screenshot and `click_at`. (Since fixed: `press` selects files in every Finder view and
-`open` opens them; see [plan 03](plans/03-open-items.md).) agent-desktop also works without taking focus, which this
+a screenshot and `click_at`. agent-desktop also works without taking focus, which this
 comparison didn't measure.
+
+**Run again with 0.7.0.** [Plan 03](plans/03-open-items.md) fixed the Finder case: `press`
+selects files in every Finder view and `open` opens them. The same scripts ran again the
+same day with ocu 0.7.0, two rounds, this time with the UI in English. All 16 runs
+passed. In the Finder task ocu needed three calls (`open_app`, `cmd+shift+a`, `open` on
+`Cell "Utilities"`) and no screenshot:
+
+| Task (medians) | Tool | Passed | Time | Turns | Tool calls | Reply characters | Input tokens | Cost |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Calculator 789 × 36 | ocu | 2/2 | 7.0 s | 3 | 2 | 1.3k | 16k | $0.023 |
+| | agent-desktop | 2/2 | 16.4 s | 7 | 6 | 15k | 129k | $0.099 |
+| System Settings > About | ocu | 2/2 | 9.8 s | 4.5 | 3.5 | 6.6k | 35k | $0.029 |
+| | agent-desktop | 2/2 | 18.4 s | 7.5 | 6.5 | 23k | 208k | $0.091 |
+| Safari: open a page, click its link | ocu | 2/2 | 15.7 s | 7 | 6 | 12k | 54k | $0.045 |
+| | agent-desktop | 2/2 | 35.7 s | 18 | 17 | 54k | 545k | $0.194 |
+| Finder: Applications > Utilities | ocu | 2/2 | 9.4 s | 4 | 3 | 6.0k | 31k | $0.024 |
+| | agent-desktop | 2/2 | 16.1 s | 8 | 7 | 39k | 190k | $0.093 |
+
+Over all 8 runs each, ocu took 84 s, 29 tool calls, 52k reply characters, 270k input
+tokens, no screenshots and $0.24. agent-desktop took 173 s, 73 tool calls, 262k reply
+characters, 2,145k input tokens, 7 screenshots and $0.95. In System Settings the model
+clicked through this time instead of using a settings link, so that task took more calls
+than in the first run. One `ocu observe` was run by hand on Finder while the second round
+was going; no run failed or stood out because of it.
 
 **Limits.** Nine runs each, four short tasks, one model, one machine. Three of the tasks
 come from ocu's own benchmark, which ocu has been tuned on, and the UI was in Chinese.
