@@ -142,7 +142,10 @@ func item(_ e: AXUIElement, _ n: Node, role: String, label raw: String, web: Boo
   let r = shown ?? String(role.dropFirst(2)).replacingOccurrences(of: "StaticText", with: "Text")
   live[ref] = Target(el: e, role: role, info: "\(r) \(label)", web: web, row: row)
   var it: [String: Any] = ["ref": ref, "role": r, "label": label]
-  if let f = n.frame { it["f"] = [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)] }
+  // An element mid-animation can report a frame with NaN or infinite numbers, which Int() traps on.
+  if let f = n.frame, [f.minX, f.minY, f.width, f.height].allSatisfy({ $0.isFinite && abs($0) < 1e9 }) {
+    it["f"] = [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)]
+  }
   if valueRoles.contains(role), !(n.title.isEmpty && n.desc.isEmpty) {
     let v = (n.value as? String) ?? (n.value as? NSNumber)?.stringValue ?? ""
     if !v.isEmpty && v != raw { it["value"] = oneLine(String(v.prefix(60))) }

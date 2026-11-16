@@ -104,10 +104,14 @@ export function proofOf(goal: string, done: { summary?: string; expect?: Expect 
 
 // Numbers and quoted strings a summary states. Numbers stand alone (the 7 in "ocu7k2" is not one).
 const CLAIMS = /“([^”]+)”|"([^"]+)"|「([^」]+)」|‘([^’]+)’|(?<![A-Za-z0-9.,])\d+(?:[.,]\d+)*(?![A-Za-z0-9])/g;
+// A made-up name in running text: letters with digits, or parts joined by - or _ ("inner-ocu93mr3", "report_v2").
+// Plain words, numbers and domains ("example.com") are not.
+const NAMED = /[a-z0-9]+(?:[-_.][a-z0-9]+)*/g;
+const isName = (w: string) => w.length >= 6 && (/[-_]/.test(w) || (/[a-z]/.test(w) && /\d/.test(w)));
 /**
- * The first name the goal quotes (“应用程序”, “实用工具”) that the summary and expect leave out. A goal in stages names
- * its stages; a summary that skips one says the batch stopped early ("open 应用程序, then go into 实用工具" is not done
- * once 应用程序 is open).
+ * The first name in the goal that the summary and expect leave out: a quoted one (“应用程序”, “实用工具”), or a
+ * made-up one written without quotes ("inner-ocu93mr3"). A goal in stages names its stages; a summary that skips one
+ * says the batch stopped early ("open 应用程序, then go into 实用工具" is not done once 应用程序 is open).
  */
 export function skippedPart(goal: string, summary: string, expect: Expect | undefined): string | undefined {
   const said = norm([summary, ...(Array.isArray(expect) ? expect : expect ? [expect] : [])].join(" "));
@@ -115,6 +119,7 @@ export function skippedPart(goal: string, summary: string, expect: Expect | unde
     const q = norm(m.slice(1).find(Boolean) ?? "");
     if (q && !has(said, q)) return q;
   }
+  for (const w of norm(goal).match(NAMED) ?? []) if (isName(w) && !has(said, w)) return w;
 }
 
 /**

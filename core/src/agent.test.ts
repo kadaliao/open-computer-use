@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Action, Element, Observation } from "./driver.ts";
-import { confirmed, has, proofOf, runTask, timing, unseenClaim, type Decide, type Driver } from "./agent.ts";
+import { confirmed, has, proofOf, runTask, skippedPart, timing, unseenClaim, type Decide, type Driver } from "./agent.ts";
 import { decide } from "./policy.ts";
 import { settle, waits } from "./screen.ts";
 import type { Step } from "./policy.ts";
@@ -394,6 +394,23 @@ describe("desktop findings", () => {
     const r = await runTask("在访达里打开“应用程序”文件夹，再进入其中的“实用工具”文件夹", { driver: finder(), decide: p.decide, noCache: true });
     expect(r.turns).toBe(3);
     expect(p.calls[1].history.at(-1)).toContain('also asks for "实用工具"');
+  });
+
+  test("a name the goal gives without quotes counts as a stage too (finder-open-list)", async () => {
+    const finder = () => new Fake("Finder", "ocu93mr3-list", [el("e5", "Row", "alpha"), el("e6", "Row", "beta")], (a, f) => {
+      if (a.action === "press") { f.window = "alpha"; f.els = [el("e30", "Row", "inner-ocu93mr3")]; }
+    });
+    const p = planner([press("e5"), { action: "done", summary: "Opened the alpha folder inside ocu93mr3-list", expect: "alpha" }], [press("e30")], [{ action: "done", summary: "now in inner-ocu93mr3" }]);
+    const r = await runTask("访达窗口里显示着 ocu93mr3-list 文件夹的内容，进入其中的 alpha 文件夹，再进入里面的 inner-ocu93mr3 文件夹", { driver: finder(), decide: p.decide, noCache: true });
+    expect(r.turns).toBe(3);
+    expect(p.calls[1].history.at(-1)).toContain('also asks for "inner-ocu93mr3"');
+  });
+
+  test("plain words, numbers and domains in a goal are not stages", () => {
+    expect(skippedPart("用 Safari 打开 example.com", "Opened the page", "Example Domain")).toBeUndefined();
+    expect(skippedPart("用计算器算 1234 加 5678", "结果是 6912", "6912")).toBeUndefined();
+    expect(skippedPart("在文本编辑里输入 ocu8kafm bold", "typed it", "ocu8kafm bold")).toBeUndefined();
+    expect(skippedPart("在文本编辑里输入 ocu8kafm bold", "typed some text", undefined)).toBe("ocu8kafm");
   });
 
   test("a settings pane whose title switches after its row lights up is still confirmed in one turn (settings-wallpaper)", async () => {

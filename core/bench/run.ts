@@ -28,7 +28,10 @@ for (const t of tasks.filter(pick)) {
   await Bun.sleep(500);
   let pass = r.ok;
   if (pass && t.verify instanceof RegExp) {
-    const d = new MacDriver(); pass = t.verify.test(render(await d.observe())); d.close();
+    // A page may still be loading when the agent finishes: look for up to 3 s before calling it a fail.
+    const d = new MacDriver();
+    for (let i = 0; i < 6 && !(pass = t.verify.test(render(await d.observe()))); i++) await Bun.sleep(500);
+    d.close();
   } else if (pass && typeof t.verify === "function") pass = t.verify(r.summary);
   else if (pass && "sh" in t.verify) pass = sh(t.verify.sh);
   const fast = r.steps.filter((s) => s.tier === "fast" || s.tier === "jev-done").length;
@@ -37,7 +40,8 @@ for (const t of tasks.filter(pick)) {
   rows.push({ id: t.id, pass, steps: r.steps.length, turns: r.turns, fast, total_ms: total, time, summary: r.summary, log: r.steps });
   console.log(`${pass ? "PASS" : "FAIL"} ${t.id}  ${r.steps.length} steps, ${r.turns} planner calls (${fast} by Jev)  ${(total / 1000).toFixed(1)}s` +
     `  [observe ${time.obs} model ${time.model} wait ${time.wait} act ${time.act} ms]`);
-  if (t.cleanup) sh(t.cleanup);
+  // A cleanup that fails leaves its document or folder for the next task to trip over: say so.
+  if (t.cleanup && !sh(t.cleanup)) console.log(`  cleanup failed for ${t.id}`);
 }
 
 const passed = rows.filter((r) => r.pass).length;
