@@ -68,32 +68,33 @@ apps and smaller models were not tested. The [roadmap](roadmap.md) lists the fol
 
 ## ocu on its own
 
-Measured with 0.6.0 on a Mac mini M2 with macOS 26. 0.7 added the `open` action and file
-selection in Finder and did not change these paths.
+Measured with 0.7.1 on 2026-11-16 on a MacBook Pro (M1 Max, macOS 26.7, English UI).
 
 | Helper (`bench/perf.ts`, p50) | |
 | --- | --- |
-| Read a window: Calculator / System Settings / Safari | 25 / 59 / 86 ms |
-| Press, one / six in a row | 3 / 16 ms |
-| Key | 1 ms |
-| Screenshot ready for a model (1280 px) | 117 ms |
+| Read a window: Calculator / Safari / System Settings | 30 / 45 / 118 ms |
+| Press, one / six in a row | 7 / 41 ms |
+| Key | under 1 ms |
 
 | MCP tool call, as the caller sees it (`bench/mcp-perf.ts`, two runs) | |
 | --- | --- |
-| One press, with the reply that says what changed | 155–182 ms |
-| Batch of 6 presses | 143–226 ms |
-| System Settings page change | 529–627 ms |
-| Web link, page loaded | 276–486 ms |
-| Action with no effect (ocu watches 600 ms for a late change) | 640–680 ms |
+| One press, with the reply that says what changed | 221–226 ms |
+| Batch of 6 presses | 216–233 ms |
+| System Settings page change | 531–549 ms |
+| Web link, page loaded | 258–382 ms |
+| Action with no effect (ocu watches 600 ms for a late change) | 622–661 ms |
 
-| Built-in agent (`bench/run.ts`, 22 tasks, DeepSeek `deepseek-chat`, cache off, two runs) | |
+| Built-in agent (`bench/run.ts`, 26 tasks, DeepSeek `deepseek-chat`, cache off, two runs) | |
 | --- | --- |
-| Passed | 22/22, 22/22 |
-| Seconds per task | 3.9, 4.0 |
-| Planner calls per task | 2.09, 2.23 |
-| Time per task: reading the screen / model / waits / actions | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
+| Passed | 25/26, 25/26 |
+| Seconds per task | 3.9, 4.7 |
+| Planner calls per task | 2.15, 2.54 |
+| Time per task: reading the screen / model / waits / actions | 0.9–1.4 / 2.1–2.3 / 0.6 / 0.2–0.4 s |
 
-The model is still more than half of the built-in agent's time.
+A different task failed in each run. In one, the agent opened the first of two nested
+folders and its `done` was accepted. In the other, the planner made text bold in a
+document that was already open instead of writing a new one. The model is about half of
+the built-in agent's time.
 
 ## Running them
 

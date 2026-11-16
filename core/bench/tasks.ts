@@ -9,7 +9,8 @@ export type Task = { id: string; goal: string; setup?: string; hard?: boolean;
 const TOKEN = `ocu${Date.now().toString(36).slice(-5)}`;
 const osa = (s: string) => `osascript -e '${s.replace(/'/g, "'\\''")}'`;
 const re = (s: string) => new RegExp(s, "i");
-const closeUntitled = osa('tell application "TextEdit" to close (every document whose name starts with "未命名") saving no');
+// Both names: the system language decides what a new document or folder is called.
+const closeUntitled = osa('tell application "TextEdit" to close (every document whose name starts with "未命名" or name starts with "Untitled") saving no');
 
 export const tasks: Task[] = [
   { id: "notes-new", goal: `在备忘录里新建一条备忘录，内容写 ${TOKEN} notes`, setup: "open -a Notes", verify: re(`${TOKEN} notes`) },
@@ -49,7 +50,7 @@ export const tasks: Task[] = [
   { id: "hard-wiki-fact", hard: true, goal: "用 Safari 打开维基百科（en.wikipedia.org），搜索 Alan Turing，告诉我他出生在哪一年",
     setup: "open -a Safari https://www.apple.com/cn/", verify: (s) => s.includes("1912") },
   { id: "hard-finder-newfolder", hard: true, goal: `在访达里打开“下载”文件夹，在里面新建一个文件夹，命名为 ${TOKEN}`,
-    setup: "open ~/Documents", verify: { sh: `test -d ~/Downloads/${TOKEN}` }, cleanup: `rmdir ~/Downloads/${TOKEN} ~/Downloads/未命名文件夹 2>/dev/null; true` },
+    setup: "open ~/Documents", verify: { sh: `test -d ~/Downloads/${TOKEN}` }, cleanup: `rmdir ~/Downloads/${TOKEN} ~/Downloads/未命名文件夹 "$HOME/Downloads/untitled folder" 2>/dev/null; true` },
   { id: "hard-settings-appearance", hard: true, goal: "打开系统设置的外观页面，告诉我当前外观是浅色、深色还是自动",
     setup: "open 'x-apple.systempreferences:com.apple.wifi-settings-extension'",
     verify: (s) => { const dark = require("node:child_process").spawnSync("defaults", ["read", "-g", "AppleInterfaceStyle"]).stdout.toString().includes("Dark");
