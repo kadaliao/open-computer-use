@@ -6,6 +6,10 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 ## [未发布]
 
+## [0.7.0] - 2026-11-16
+
+访达里的文件在每种视图下都能选中和打开，项目也有了中英文文档。在 5 个文件视图任务上，内置 agent 从 3/5 通过、每个任务 12.0 秒、10.4 次规划模型调用，变成 5/5 通过、3.6 秒、2.8 次调用。
+
 ### 新增
 
 - 新操作 `open{ref}`：相当于双击文件、文件夹或行，打开文件或进入文件夹。访达的四种视图和“打开”“存储”面板里都能用。
@@ -129,7 +133,8 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 第一个版本：以辅助功能为主的 macOS computer-use agent，包含 Swift helper、TypeScript core、命令行和 MCP 服务。
 
-[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...HEAD
+[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kadaliao/open-computer-use/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/kadaliao/open-computer-use/compare/v0.4.2...v0.4.3

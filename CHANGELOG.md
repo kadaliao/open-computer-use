@@ -9,6 +9,12 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-16
+
+Files in Finder can be selected and opened from every view, and the project gets its
+documentation in English and Chinese. On five file-view tasks the built-in agent went
+from 3 of 5 passed, 12.0 s and 10.4 planner calls a task to 5 of 5, 3.6 s and 2.8 calls.
+
 ### Added
 
 - `open{ref}` action: a double click on a file, folder or row. It opens the file or goes
@@ -163,7 +169,8 @@ planner calls each, against 20/22 at 9.8 s and 4 calls for 0.5.0. See
 First release: an accessibility-first computer-use agent for macOS, with a Swift helper,
 a TypeScript core, a CLI and an MCP server.
 
-[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/kadaliao/open-computer-use/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/kadaliao/open-computer-use/compare/v0.4.2...v0.4.3
