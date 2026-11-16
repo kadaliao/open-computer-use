@@ -105,8 +105,8 @@ Shipped (2026-11-16, macOS 26, Finder in English):
   view. When nothing takes the selection, a row, file or text gets a real click instead
   of a silent `AXPress`.
 - **`open{ref}`**: select, then `AXOpen` on the item or on an element inside its row
-  (`"via":"open"`); with no `AXOpen`, cmd+down on the selection (`"via":"key"`); else a
-  double click (`"via":"double-click"`). It is in the MCP `act` enum and instructions,
+  (`"via":"open"`); with no `AXOpen`, a double click (`"via":"double-click"`); with no
+  frame to click, cmd+down on the selection (`"via":"key"`). It is in the MCP `act` enum and instructions,
   the planner prompt and `docs/concepts`. Still three core tools.
 - **Listing.** Files in column, icon and gallery view are listed as `Cell "name"` (a name
   being edited stays a `TextField`). List view keeps its `Row` lines.
@@ -128,11 +128,15 @@ Left out or changed:
 - The new bench tasks open a folder made for the run instead of Applications > Utilities,
   so that the Go menu can't stand in for the file list. The view is set with AppleScript
   in setup, not with cmd+1/2/3.
-- The agent-desktop comparison (plan 01) has not been run again, so "no screenshot in the
-  vs-benchmark Finder task" is shown only by `finder-utilities` here (2 planner calls, no
-  screenshot).
-- The cmd+down and double-click fallbacks of `open` have no app that exercises them yet;
-  only the `AXOpen` path was seen running.
+- The agent-desktop comparison was run again with 0.7.0 (reference scripts, two rounds;
+  numbers in `docs/benchmarks.md`): in the Finder task ocu went from 22.6 s and 6.5 tool
+  calls with a screenshot to 9.4 s and 3 calls with none.
+- The fallbacks of `open` were tested after 0.7.0, and their order changed: the plan put
+  cmd+down before the double click, but on an Activity Monitor process row (no `AXOpen`)
+  cmd+down did nothing while a double click opened the process window. With `AXOpen`
+  switched off in a test build, both fallbacks opened a folder in all four Finder views.
+  The double click reads the item's frame again after selecting, because the selection
+  scrolls a narrow column view sideways (the first try landed one column off).
 - A file that is scrolled out of sight in icon or gallery view is not listed, and those
   lists give no "showing N of M" line. `find_text` doesn't reach it either.
 - No debug flag in the helper: the hierarchy was dumped with a throwaway script.

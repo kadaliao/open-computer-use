@@ -9,6 +9,11 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ## [Unreleased]
 
+### Fixed
+
+- `open` on a row that has no open action of its own (a process in Activity Monitor)
+  double-clicks it. It used to send cmd+down, which only file lists understand.
+
 ## [0.7.0] - 2026-11-16
 
 Files in Finder can be selected and opened from every view, and the project gets its

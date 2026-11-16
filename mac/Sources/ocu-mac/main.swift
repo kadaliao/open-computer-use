@@ -714,14 +714,17 @@ func act(_ r: [String: Any]) -> [String: Any] {
       // the caller sees on the next screen whether it worked.
       AXUIElementPerformAction(o, "AXOpen" as CFString)
       res["via"] = "open"
-    } else if selected {
-      focusTarget()
-      postKey(125, flags: .maskCommand)  // cmd+down
-      res["via"] = "key"
-    } else {
-      guard let f, f.width > 0 else { return ["error": "open failed: nothing to open here; use press"] }
+    } else if let f = frame(el), f.width > 0 {  // read again: selecting can scroll a column view sideways
+      // No AXOpen (a table that isn't a file list): double-click it. cmd+down, Finder's Open, means nothing
+      // in most apps: on an Activity Monitor process row it did nothing, a double click opened its window.
       realClick(f, count: 2)
       res["via"] = "double-click"
+    } else if selected {
+      focusTarget()
+      postKey(125, flags: .maskCommand)  // cmd+down: opens the selection in file lists
+      res["via"] = "key"
+    } else {
+      return ["error": "open failed: nothing to open here; use press"]
     }
   case "set_value":
     guard let el, let t = r["text"] as? String else { return ["error": ref != nil && el == nil ? "unknown ref" : "bad args"] }
