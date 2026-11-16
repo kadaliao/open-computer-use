@@ -2,16 +2,103 @@
 
 **English** · [简体中文](benchmarks.zh-CN.md)
 
-How ocu is measured, and the numbers for each release. The benchmarks drive real apps on
-the Mac they run on, so close anything you are working in first.
+How ocu performs: against another tool, and on its own. Only the latest measurements are
+kept here; the [changelog](../CHANGELOG.md) has what each release changed.
 
-- [Running them](#running-them)
-- [Results: 0.6.0](#results-060)
 - [Compared with agent-desktop](#compared-with-agent-desktop)
+- [ocu on its own](#ocu-on-its-own)
+- [Running them](#running-them)
+
+## Compared with agent-desktop
+
+The same model drove the same four tasks through ocu's MCP server and through
+[agent-desktop](https://github.com/vercel-labs/agent-desktop)'s. Both passed all 8 of
+their runs.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/vs-agent-desktop-en-dark.svg">
+    <img alt="ocu 0.7.0 against agent-desktop 1.3.1 over the same four tasks: 84 s against 173 s, 29 tool calls against 73, 270k input tokens against 2,145k, $0.24 against $0.95" src="assets/vs-agent-desktop-en-light.svg" width="820">
+  </picture>
+</p>
+
+Per task (medians of two runs):
+
+<table>
+  <tr><th>Task</th><th>Tool</th><th align="right">Time</th><th align="right">Tool calls</th><th align="right">Reply characters</th><th align="right">Input tokens</th><th align="right">Cost</th></tr>
+  <tr><td rowspan="2">Calculator: 789 × 36</td><td><b>ocu</b></td><td align="right"><b>7.0 s</b></td><td align="right"><b>2</b></td><td align="right"><b>1.3k</b></td><td align="right"><b>16k</b></td><td align="right"><b>$0.023</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">16.4 s</td><td align="right">6</td><td align="right">15k</td><td align="right">129k</td><td align="right">$0.099</td></tr>
+  <tr><td rowspan="2">System Settings: open About</td><td><b>ocu</b></td><td align="right"><b>9.8 s</b></td><td align="right"><b>3.5</b></td><td align="right"><b>6.6k</b></td><td align="right"><b>35k</b></td><td align="right"><b>$0.029</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">18.4 s</td><td align="right">6.5</td><td align="right">23k</td><td align="right">208k</td><td align="right">$0.091</td></tr>
+  <tr><td rowspan="2">Safari: open a page, click its link</td><td><b>ocu</b></td><td align="right"><b>15.7 s</b></td><td align="right"><b>6</b></td><td align="right"><b>12k</b></td><td align="right"><b>54k</b></td><td align="right"><b>$0.045</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">35.7 s</td><td align="right">17</td><td align="right">54k</td><td align="right">545k</td><td align="right">$0.194</td></tr>
+  <tr><td rowspan="2">Finder: Applications > Utilities</td><td><b>ocu</b></td><td align="right"><b>9.4 s</b></td><td align="right"><b>3</b></td><td align="right"><b>6.0k</b></td><td align="right"><b>31k</b></td><td align="right"><b>$0.024</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">16.1 s</td><td align="right">7</td><td align="right">39k</td><td align="right">190k</td><td align="right">$0.093</td></tr>
+  <tr><td rowspan="2"><b>All four, 8 runs each (totals)</b></td><td><b>ocu</b></td><td align="right"><b>84 s</b></td><td align="right"><b>29</b></td><td align="right"><b>52k</b></td><td align="right"><b>270k</b></td><td align="right"><b>$0.24</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">173 s</td><td align="right">73</td><td align="right">262k</td><td align="right">2,145k</td><td align="right">$0.95</td></tr>
+</table>
+
+**Setup.** 2026-11-16, MacBook Pro (M1 Max, macOS 26.7, English UI).
+
+- **Caller.** Claude Code 2.1.325 in headless mode (`claude -p`) with Sonnet 5.5. No
+  built-in tools, no user settings, one MCP server per run. Tool search was off, so all
+  of agent-desktop's tools were loaded directly.
+- **ocu.** 0.7.0 with model keys removed, so only `observe`, `act` and `screenshot`.
+- **agent-desktop.** 1.3.1 with its defaults: 75 tools, headless.
+- **Runs.** Each task first resets its app. The outcome was checked on the real screen,
+  or in the answer for Calculator. Two rounds, with the order alternating. Costs are API
+  prices.
+
+The scripts are in [plans/assets](plans/assets/vs-agent-desktop/).
+
+**Where the gap comes from** (from the call logs):
+
+- **Checking the result.** An ocu `act` reply already shows what changed. After an
+  agent-desktop action, the model read again with `snapshot`, `find`, `get` or a
+  screenshot (7 screenshots over its 8 runs; ocu needed none).
+- **Reply size.** One text line per element, against a JSON tree.
+- **Fixed cost per run.** agent-desktop's guide (`skills_get`, about 10k characters) was
+  read at the start of every run, and its 75 tool definitions (42k characters) go with
+  every request.
+
+**Limits.** Eight runs each, four short tasks, one model, one machine. Three of the tasks
+come from ocu's own benchmark, which ocu has been tuned on. agent-desktop works without
+taking focus, which this comparison didn't measure. Tool search, harder tasks, Electron
+apps and smaller models were not tested. The [roadmap](roadmap.md) lists the follow-ups.
+
+## ocu on its own
+
+Measured with 0.6.0 on a Mac mini M2 with macOS 26. 0.7 added the `open` action and file
+selection in Finder and did not change these paths.
+
+| Helper (`bench/perf.ts`, p50) | |
+| --- | --- |
+| Read a window: Calculator / System Settings / Safari | 25 / 59 / 86 ms |
+| Press, one / six in a row | 3 / 16 ms |
+| Key | 1 ms |
+| Screenshot ready for a model (1280 px) | 117 ms |
+
+| MCP tool call, as the caller sees it (`bench/mcp-perf.ts`, two runs) | |
+| --- | --- |
+| One press, with the reply that says what changed | 155–182 ms |
+| Batch of 6 presses | 143–226 ms |
+| System Settings page change | 529–627 ms |
+| Web link, page loaded | 276–486 ms |
+| Action with no effect (ocu watches 600 ms for a late change) | 640–680 ms |
+
+| Built-in agent (`bench/run.ts`, 22 tasks, DeepSeek `deepseek-chat`, cache off, two runs) | |
+| --- | --- |
+| Passed | 22/22, 22/22 |
+| Seconds per task | 3.9, 4.0 |
+| Planner calls per task | 2.09, 2.23 |
+| Time per task: reading the screen / model / waits / actions | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
+
+The model is still more than half of the built-in agent's time.
 
 ## Running them
 
-From `core/`:
+The benchmarks drive real apps on the Mac they run on, so close anything you are working
+in first. From `core/`:
 
 ```sh
 bun bench/run.ts                          # built-in agent, all tasks (Jev + planner)
@@ -32,132 +119,10 @@ bun bench/mcp-perf.ts <label>             # MCP tool calls as a caller sees them
   replays.
 - `OCU_SETTLE_LOG=1` prints, for every wait for the screen, how long it took and when the
   change first showed. Use it when tuning the waits in `screen.ts`.
+- **The chart** above is drawn by `bun docs/assets/vs-chart.ts`; after a new comparison,
+  change the numbers at the top of that file and run it.
 
-When you report numbers, give the machine, the macOS version, the model, and a run of the
-previous release on the same machine the same day. Single runs wobble; give the range of
-two runs or more.
-
-## Results: 0.6.0
-
-Measured on a Mac mini M2 with macOS 26 and a remote-desktop session adding some load,
-so single numbers wobble. Compared with 0.5 (commit `72c21a3`) on the same machine the
-same day.
-
-**Helper** (`bench/perf.ts`, p50):
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| observe Calculator / System Settings / Safari | 43 / 82 / 149 ms | 25 / 59 / 86 ms |
-| repeat read while waiting (quiet) | – | 27–60 ms |
-| press, one / six in a row | 174 / 1183 ms | 3 / 16 ms |
-| key | 112 ms | 1 ms |
-| screenshot ready for a model (1280 px) | 266 ms | 117 ms |
-
-**MCP tool calls** as a caller sees them (`bench/mcp-perf.ts`, 12 calls, two runs each):
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| total | 7.5 s | 3.9–4.5 s |
-| one press | 418 ms | 155–182 ms |
-| batch of 6 presses | 1684 ms | 143–226 ms |
-| settings page change | 1201 ms | 529–627 ms |
-| web link, page load | 896 ms (load not seen) | 276–486 ms |
-| action with no effect | 330–780 ms | 640–680 ms (watches 600 ms for a late change) |
-| characters in the 8 act replies | 6.6k | 4.1–4.3k |
-
-**Built-in agent** (`bench/run.ts`, 22 tasks, DeepSeek `deepseek-chat`, cache off):
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| passed | 20/22 | 22/22, 22/22 (two runs on the final code; 20–22 in four earlier runs while tuning) |
-| seconds per task | 9.8 (6.2 without one 85 s failure) | 3.9, 4.0 |
-| planner calls per task | 4.05 | 2.09, 2.23 |
-| time split per task (observe / model / waits / actions) | – | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
-
-Most of the gain is fewer planner round trips (a batch that ends in a locally checked
-`done`) and the helper's faster actions. The model is still more than half the time.
-
-**Batching from an MCP caller.** Claude Code (Sonnet) computed 789 × 36 on Calculator in
-4 turns and 19 s using a batched `act`. Without batching the same task took 11 turns and
-45 s.
-
-## Compared with agent-desktop
-
-On 2026-11-16 the same model drove the same tasks through ocu's MCP server and through
-[agent-desktop](https://github.com/vercel-labs/agent-desktop)'s, on one Mac (MacBook Pro,
-M1 Max, macOS 26.7, Chinese UI).
-
-**Setup.**
-
-- **Caller.** Claude Code 2.1.325 in headless mode (`claude -p`) with Sonnet 5.5. No
-  built-in tools, no user settings, and only one MCP server per run. Tool search was
-  off, so all of agent-desktop's tools were loaded directly.
-- **ocu.** 0.6.0 with model keys removed, so only `observe`, `act` and `screenshot`.
-- **agent-desktop.** 1.3.1 with its defaults: 75 tools, headless.
-- **Runs.** Each task first resets its app. The outcome was checked on the real screen,
-  or in the answer for Calculator. Each pair ran 2–3 times, with the order alternating.
-
-The reference scripts are in [plans/assets](plans/assets/vs-agent-desktop/).
-
-| Task (medians) | Tool | Passed | Time | Turns | Tool calls | Reply characters | Input tokens | Cost |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Calculator 789 × 36 | ocu | 3/3 | 7.5 s | 3 | 2 | 1.2k | 18k | $0.008 |
-| | agent-desktop | 3/3 | 19.2 s | 8 | 7 | 19k | 137k | $0.073 |
-| System Settings > About | ocu | 2/2 | 6.3 s | 2 | 1 | 2.2k | 13k | $0.009 |
-| | agent-desktop | 2/2 | 19.6 s | 8 | 7 | 29k | 222k | $0.086 |
-| Safari: open a page, click its link | ocu | 2/2 | 15.8 s | 5.5 | 4.5 | 12k | 48k | $0.044 |
-| | agent-desktop | 2/2 | 40.7 s | 19.5 | 18.5 | 69k | 782k | $0.240 |
-| Finder: Applications > Utilities | ocu | 2/2 | 22.6 s | 7.5 | 6.5 | 8k | 64k | $0.044 |
-| | agent-desktop | 2/2 | 33.5 s | 12.5 | 11.5 | 73k | 399k | $0.209 |
-
-Over all 9 runs each, ocu took 112 s, 31 tool calls, 49k reply characters, 306k input
-tokens and $0.24. agent-desktop took 243 s, 95 tool calls, 403k reply characters, 3,249k
-input tokens and $1.35. Costs are API prices.
-
-**Where the gap comes from** (from the call logs):
-
-- **Checking the result.** An ocu `act` reply already shows what changed. After an
-  agent-desktop action, the model read again with `snapshot`, `find`, `get` or a
-  screenshot.
-- **Reply size.** One text line per element, against a JSON tree.
-- **Fixed cost per run.** agent-desktop's guide (`skills_get`, about 10k characters) was
-  read at the start of every run, and its 75 tool definitions (42k characters) go with
-  every request. Without the guide call, the gap is still 2.7× in tool calls and 6× in
-  reply characters.
-- **A shortcut.** ocu reached System Settings > About in one call with `open_url` and a
-  settings link; agent-desktop has no such action and clicked through.
-
-**Where agent-desktop did better.** In Finder's column view it opened folders by
-clicking them. ocu's `press` on a file name there did nothing, so the model fell back to
-a screenshot and `click_at`. agent-desktop also works without taking focus, which this
-comparison didn't measure.
-
-**Run again with 0.7.0.** [Plan 03](plans/03-open-items.md) fixed the Finder case: `press`
-selects files in every Finder view and `open` opens them. The same scripts ran again the
-same day with ocu 0.7.0, two rounds, this time with the UI in English. All 16 runs
-passed. In the Finder task ocu needed three calls (`open_app`, `cmd+shift+a`, `open` on
-`Cell "Utilities"`) and no screenshot:
-
-| Task (medians) | Tool | Passed | Time | Turns | Tool calls | Reply characters | Input tokens | Cost |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Calculator 789 × 36 | ocu | 2/2 | 7.0 s | 3 | 2 | 1.3k | 16k | $0.023 |
-| | agent-desktop | 2/2 | 16.4 s | 7 | 6 | 15k | 129k | $0.099 |
-| System Settings > About | ocu | 2/2 | 9.8 s | 4.5 | 3.5 | 6.6k | 35k | $0.029 |
-| | agent-desktop | 2/2 | 18.4 s | 7.5 | 6.5 | 23k | 208k | $0.091 |
-| Safari: open a page, click its link | ocu | 2/2 | 15.7 s | 7 | 6 | 12k | 54k | $0.045 |
-| | agent-desktop | 2/2 | 35.7 s | 18 | 17 | 54k | 545k | $0.194 |
-| Finder: Applications > Utilities | ocu | 2/2 | 9.4 s | 4 | 3 | 6.0k | 31k | $0.024 |
-| | agent-desktop | 2/2 | 16.1 s | 8 | 7 | 39k | 190k | $0.093 |
-
-Over all 8 runs each, ocu took 84 s, 29 tool calls, 52k reply characters, 270k input
-tokens, no screenshots and $0.24. agent-desktop took 173 s, 73 tool calls, 262k reply
-characters, 2,145k input tokens, 7 screenshots and $0.95. In System Settings the model
-clicked through this time instead of using a settings link, so that task took more calls
-than in the first run. One `ocu observe` was run by hand on Finder while the second round
-was going; no run failed or stood out because of it.
-
-**Limits.** Nine runs each, four short tasks, one model, one machine. Three of the tasks
-come from ocu's own benchmark, which ocu has been tuned on, and the UI was in Chinese.
-Tool search, harder tasks, Electron apps and smaller models were not tested. The
-[roadmap](roadmap.md) lists the follow-ups.
-
+When you report numbers, give the machine, the macOS version and the model, and run on a
+quiet machine: under load the times are not comparable. Single runs wobble; give the
+range of two runs or more. To claim a speed-up, run the previous release on the same
+machine the same day.

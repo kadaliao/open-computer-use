@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 396" width="820" height="396" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" role="img" aria-label="同一个模型，同样四个任务：ocu 对比 agent-desktop">
+<text x="24" y="32" font-size="18" font-weight="600" fill="#0b0b0b">同一个模型，同样四个任务：ocu 对比 agent-desktop</text>
+<rect x="24" y="52" width="12" height="12" rx="3" fill="#2a78d6"/><text x="42" y="63" font-size="13" fill="#52514e">ocu 0.7.0</text>
+<rect x="134" y="52" width="12" height="12" rx="3" fill="#898781"/><text x="152" y="63" font-size="13" fill="#52514e">agent-desktop 1.3.1</text>
+<line x1="24" x2="796" y1="82" y2="82" stroke="#e1e0d9"/>
+<text x="24" y="119" font-size="14" font-weight="600" fill="#0b0b0b">耗时</text>
+<path d="M150,96h209.64161849710982a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-209.64161849710982z" fill="#2a78d6"/>
+<text x="371.6416184971098" y="108" font-size="13" font-weight="600" fill="#0b0b0b">84 s</text>
+<path d="M150,116h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="128" font-size="13" fill="#52514e">173 s</text>
+<text x="796" y="116" font-size="22" font-weight="700" fill="#0b0b0b" text-anchor="end">2.1×</text>
+<text x="796" y="134" font-size="12" fill="#52514e" text-anchor="end">更快</text>
+<line x1="24" x2="796" y1="148" y2="148" stroke="#e1e0d9"/>
+<text x="24" y="185" font-size="14" font-weight="600" fill="#0b0b0b">工具调用</text>
+<path d="M150,162h170.79452054794518a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-170.79452054794518z" fill="#2a78d6"/>
+<text x="332.7945205479452" y="174" font-size="13" font-weight="600" fill="#0b0b0b">29</text>
+<path d="M150,182h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="194" font-size="13" fill="#52514e">73</text>
+<text x="796" y="182" font-size="22" font-weight="700" fill="#0b0b0b" text-anchor="end">2.5×</text>
+<text x="796" y="200" font-size="12" fill="#52514e" text-anchor="end">更少</text>
+<line x1="24" x2="796" y1="214" y2="214" stroke="#e1e0d9"/>
+<text x="24" y="251" font-size="14" font-weight="600" fill="#0b0b0b">输入 token</text>
+<path d="M150,228h51.38461538461539a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-51.38461538461539z" fill="#2a78d6"/>
+<text x="213.3846153846154" y="240" font-size="13" font-weight="600" fill="#0b0b0b">270k</text>
+<path d="M150,248h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="260" font-size="13" fill="#52514e">2,145k</text>
+<text x="796" y="248" font-size="22" font-weight="700" fill="#0b0b0b" text-anchor="end">7.9×</text>
+<text x="796" y="266" font-size="12" fill="#52514e" text-anchor="end">更少</text>
+<line x1="24" x2="796" y1="280" y2="280" stroke="#e1e0d9"/>
+<text x="24" y="317" font-size="14" font-weight="600" fill="#0b0b0b">费用</text>
+<path d="M150,294h107.15789473684211a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-107.15789473684211z" fill="#2a78d6"/>
+<text x="269.1578947368421" y="306" font-size="13" font-weight="600" fill="#0b0b0b">$0.24</text>
+<path d="M150,314h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="326" font-size="13" fill="#52514e">$0.95</text>
+<text x="796" y="314" font-size="22" font-weight="700" fill="#0b0b0b" text-anchor="end">4.0×</text>
+<text x="796" y="332" font-size="12" fill="#52514e" text-anchor="end">更省</text>
+<text x="24" y="382" font-size="12" fill="#898781">各 8 次运行的合计，16 次全部通过。Claude Code + Sonnet 5.5，MacBook Pro M1 Max，2026-11-16。越短越好。</text>
+</svg>

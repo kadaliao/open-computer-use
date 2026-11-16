@@ -6,7 +6,7 @@
 
 ## 检查清单
 
-1. **测量。** 跑覆盖这次改动的基准测试，并在同一台机器、同一天跑一遍上一个版本做对比（见[基准测试](benchmarks.zh-CN.md)）。数字有变化就更新 `docs/benchmarks.md` 和 `docs/benchmarks.zh-CN.md`。
+1. **测量。** 跑覆盖这次改动的基准测试，并在同一台机器、同一天跑一遍上一个版本做对比（见[基准测试](benchmarks.zh-CN.md)）。数字有变化就替换 `docs/benchmarks.md` 和 `docs/benchmarks.zh-CN.md` 里的旧数字，这两页只保留最新一次测量。做了新的对比还要重画那张图（`bun docs/assets/vs-chart.ts`）。
 2. **改版本号**，两处都要改：
    - `core/package.json`（`"version"`）
    - `core/src/mcp.ts`（`McpServer` 的 version）

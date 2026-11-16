@@ -31,6 +31,20 @@ open-computer-use（`ocu`）读取 Mac 应用的辅助功能树（accessibility 
   DeepSeek Harness……）。思考由你的 agent 来做，ocu 自己不需要模型 key。
 - **作为独立 agent**：`ocu run "<目标>"` 用任意兼容 OpenAI 接口的模型来规划（默认 DeepSeek）。
 
+## 让你的 agent 更快、更省
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vs-agent-desktop-zh-dark.svg">
+    <img alt="ocu 0.7.0 对比 agent-desktop 1.3.1，同样四个任务：84 秒对 173 秒，29 次工具调用对 73 次，27 万输入 token 对 214.5 万，$0.24 对 $0.95" src="docs/assets/vs-agent-desktop-zh-light.svg" width="820">
+  </picture>
+</p>
+
+同一个模型做同样的四个任务，用 ocu 的 agent 只花了用
+[agent-desktop](https://github.com/vercel-labs/agent-desktop) 的一半时间，工具调用是它的四成，
+输入 token 是八分之一，费用是四分之一。两边每次都做对了。
+每个任务的数字、测试设置和这次测试的局限见[基准测试](docs/benchmarks.zh-CN.md)。
+
 ## 亮点
 
 - **用文字，不用像素。** 元素带着自己的状态（`[checked]`、`[selected]`、`= "value"`）。
@@ -41,9 +55,6 @@ open-computer-use（`ocu`）读取 Mac 应用的辅助功能树（accessibility 
   Claude Code 在计算器里算 789 × 36，用批量 4 轮、19 秒；不用批量要 11 轮、45 秒。
 - **快。** helper 里一次按下约 3 ms，读一个窗口 25–90 ms。内置 agent 22 个基准任务全部通过，
   每个任务约 4 秒、2 次规划模型调用（[基准测试](docs/benchmarks.zh-CN.md)）。
-- **比返回 JSON 树的工具省调用、省 token。** 同一个模型跑同样的四个任务，ocu 0.7.0 用了 84 秒、
-  29 次工具调用、27 万输入 token；agent-desktop 1.3.1 用了 173 秒、73 次调用、214.5 万 token。
-  两边 8 次都通过（[对比](docs/benchmarks.zh-CN.md#和-agent-desktop-对比)）。
 - **截图兜底。** 对画布类应用、游戏和部分 Electron 应用，视觉模型可以定位并点击辅助功能树里没有的东西。
   这一项是可选的。
 - **动作缓存。** 内置 agent 会保存成功过的任务，下次换了数字或引号里的文字也能直接重放，不调用模型。
@@ -148,7 +159,7 @@ ocu 用你的权限操作你真实的桌面。光标覆盖层会显示它在哪�
 | [配置](docs/configuration.zh-CN.md) | 所有环境变量，以及规划和视觉模型的选择 |
 | [故障排查](docs/troubleshooting.zh-CN.md) | 权限、常见错误、已知限制 |
 | [架构](docs/architecture.zh-CN.md) | helper 和 core 怎么配合，以及 helper 协议 |
-| [基准测试](docs/benchmarks.zh-CN.md) | 怎么测、每个版本的数据，以及和 agent-desktop 的对比 |
+| [基准测试](docs/benchmarks.zh-CN.md) | 和 agent-desktop 的对比、ocu 自己的数字，以及怎么测 |
 | [路线图](docs/roadmap.zh-CN.md) | ocu 接下来往哪走，以及每项工作的计划 |
 | [参与贡献](CONTRIBUTING.zh-CN.md) | 开发环境、测试、约定 |
 | [更新日志](CHANGELOG.zh-CN.md) | 每个版本改了什么 |

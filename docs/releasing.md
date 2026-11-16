@@ -9,8 +9,10 @@ version may change the screen format or tool behavior, and the changelog says ho
 ## Checklist
 
 1. **Measure.** Run the benchmarks that cover what changed, and the previous release on
-   the same machine the same day (see [benchmarks](benchmarks.md)). Put the numbers in
-   `docs/benchmarks.md` and `docs/benchmarks.zh-CN.md` if they changed.
+   the same machine the same day (see [benchmarks](benchmarks.md)). If the numbers changed,
+   replace them in `docs/benchmarks.md` and `docs/benchmarks.zh-CN.md`: those pages keep only
+   the latest measurements. After a new comparison, also redraw the chart
+   (`bun docs/assets/vs-chart.ts`).
 2. **Bump the version** in both places:
    - `core/package.json` (`"version"`)
    - `core/src/mcp.ts` (the `McpServer` version)

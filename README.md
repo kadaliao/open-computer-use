@@ -34,6 +34,21 @@ it what changed. You can use it in two ways:
 - **As a standalone agent**: `ocu run "<goal>"` plans with any OpenAI-compatible model
   (DeepSeek by default).
 
+## Faster and cheaper for your agent
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/vs-agent-desktop-en-dark.svg">
+    <img alt="ocu 0.7.0 against agent-desktop 1.3.1 over the same four tasks: 84 s against 173 s, 29 tool calls against 73, 270k input tokens against 2,145k, $0.24 against $0.95" src="docs/assets/vs-agent-desktop-en-light.svg" width="820">
+  </picture>
+</p>
+
+With the same model on the same four tasks, an agent using ocu finished in half the time
+of one using [agent-desktop](https://github.com/vercel-labs/agent-desktop), with 2.5×
+fewer tool calls, 8× fewer input tokens and a quarter of the cost. Both passed every run.
+The per-task numbers, the setup and the limits of the test are in
+[benchmarks](docs/benchmarks.md).
+
 ## Highlights
 
 - **Text, not pixels.** Elements come with their state (`[checked]`, `[selected]`,
@@ -47,10 +62,6 @@ it what changed. You can use it in two ways:
 - **Fast.** A press takes about 3 ms in the helper and reading a window 25–90 ms. The
   built-in agent passes 22 of 22 benchmark tasks at about 4 s and 2 planner calls each
   ([benchmarks](docs/benchmarks.md)).
-- **Fewer calls and tokens than a tree-of-JSON tool.** With the same model on the same
-  four tasks, ocu 0.7.0 took 84 s, 29 tool calls and 270k input tokens; agent-desktop
-  1.3.1 took 173 s, 73 calls and 2,145k tokens. Both passed all 8 runs
-  ([comparison](docs/benchmarks.md#compared-with-agent-desktop)).
 - **Screenshot fallback.** For canvas apps, games and some Electron apps, a vision model
   can locate and click what the accessibility tree doesn't list. This is optional.
 - **Action cache.** The built-in agent saves tasks that worked and replays them, with new
@@ -163,7 +174,7 @@ acts, and every action is refused while the screen is locked.
 | [Configuration](docs/configuration.md) | Every environment variable, and model choices for planning and vision |
 | [Troubleshooting](docs/troubleshooting.md) | Permissions, common errors, known limits |
 | [Architecture](docs/architecture.md) | How the helper and the core fit together, and the helper protocol |
-| [Benchmarks](docs/benchmarks.md) | How to measure, the numbers for each release, and the comparison with agent-desktop |
+| [Benchmarks](docs/benchmarks.md) | The comparison with agent-desktop, ocu's own numbers, and how to measure |
 | [Roadmap](docs/roadmap.md) | Where ocu is going, and a plan for each piece of work |
 | [Contributing](CONTRIBUTING.md) | Development setup, tests, conventions |
 | [Changelog](CHANGELOG.md) | What changed in each version |

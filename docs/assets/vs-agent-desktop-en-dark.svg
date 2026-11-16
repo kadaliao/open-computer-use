@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 396" width="820" height="396" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" role="img" aria-label="Same model, same four tasks: ocu vs agent-desktop">
+<text x="24" y="32" font-size="18" font-weight="600" fill="#f0efec">Same model, same four tasks: ocu vs agent-desktop</text>
+<rect x="24" y="52" width="12" height="12" rx="3" fill="#3987e5"/><text x="42" y="63" font-size="13" fill="#c3c2b7">ocu 0.7.0</text>
+<rect x="134" y="52" width="12" height="12" rx="3" fill="#898781"/><text x="152" y="63" font-size="13" fill="#c3c2b7">agent-desktop 1.3.1</text>
+<line x1="24" x2="796" y1="82" y2="82" stroke="#2c2c2a"/>
+<text x="24" y="119" font-size="14" font-weight="600" fill="#f0efec">Time</text>
+<path d="M150,96h209.64161849710982a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-209.64161849710982z" fill="#3987e5"/>
+<text x="371.6416184971098" y="108" font-size="13" font-weight="600" fill="#f0efec">84 s</text>
+<path d="M150,116h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="128" font-size="13" fill="#c3c2b7">173 s</text>
+<text x="796" y="116" font-size="22" font-weight="700" fill="#f0efec" text-anchor="end">2.1×</text>
+<text x="796" y="134" font-size="12" fill="#c3c2b7" text-anchor="end">faster</text>
+<line x1="24" x2="796" y1="148" y2="148" stroke="#2c2c2a"/>
+<text x="24" y="185" font-size="14" font-weight="600" fill="#f0efec">Tool calls</text>
+<path d="M150,162h170.79452054794518a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-170.79452054794518z" fill="#3987e5"/>
+<text x="332.7945205479452" y="174" font-size="13" font-weight="600" fill="#f0efec">29</text>
+<path d="M150,182h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="194" font-size="13" fill="#c3c2b7">73</text>
+<text x="796" y="182" font-size="22" font-weight="700" fill="#f0efec" text-anchor="end">2.5×</text>
+<text x="796" y="200" font-size="12" fill="#c3c2b7" text-anchor="end">fewer</text>
+<line x1="24" x2="796" y1="214" y2="214" stroke="#2c2c2a"/>
+<text x="24" y="251" font-size="14" font-weight="600" fill="#f0efec">Input tokens</text>
+<path d="M150,228h51.38461538461539a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-51.38461538461539z" fill="#3987e5"/>
+<text x="213.3846153846154" y="240" font-size="13" font-weight="600" fill="#f0efec">270k</text>
+<path d="M150,248h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="260" font-size="13" fill="#c3c2b7">2,145k</text>
+<text x="796" y="248" font-size="22" font-weight="700" fill="#f0efec" text-anchor="end">7.9×</text>
+<text x="796" y="266" font-size="12" fill="#c3c2b7" text-anchor="end">fewer</text>
+<line x1="24" x2="796" y1="280" y2="280" stroke="#2c2c2a"/>
+<text x="24" y="317" font-size="14" font-weight="600" fill="#f0efec">Cost</text>
+<path d="M150,294h107.15789473684211a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-107.15789473684211z" fill="#3987e5"/>
+<text x="269.1578947368421" y="306" font-size="13" font-weight="600" fill="#f0efec">$0.24</text>
+<path d="M150,314h436a4,4 0 0 1 4,4v6a4,4 0 0 1 -4,4h-436z" fill="#898781"/>
+<text x="598" y="326" font-size="13" fill="#c3c2b7">$0.95</text>
+<text x="796" y="314" font-size="22" font-weight="700" fill="#f0efec" text-anchor="end">4.0×</text>
+<text x="796" y="332" font-size="12" fill="#c3c2b7" text-anchor="end">cheaper</text>
+<text x="24" y="382" font-size="12" fill="#898781">Totals over 8 runs each, all 16 passed. Claude Code with Sonnet 5.5, MacBook Pro M1 Max, 2026-11-16. Shorter is better.</text>
+</svg>

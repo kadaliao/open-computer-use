@@ -2,15 +2,87 @@
 
 [English](benchmarks.md) · **简体中文**
 
-ocu 怎么测，以及每个版本的数字。基准测试会在本机上操作真实的应用，所以先把手头在用的东西关掉。
+ocu 的表现：和别的工具比，以及它自己的数字。这里只保留最新一次测量；每个版本改了什么见[更新日志](../CHANGELOG.zh-CN.md)。
 
-- [运行方法](#运行方法)
-- [0.6.0 的结果](#060-的结果)
 - [和 agent-desktop 对比](#和-agent-desktop-对比)
+- [ocu 自己的数字](#ocu-自己的数字)
+- [运行方法](#运行方法)
+
+## 和 agent-desktop 对比
+
+让同一个模型分别通过 ocu 和 [agent-desktop](https://github.com/vercel-labs/agent-desktop) 的 MCP 服务做同样的四个任务。两边各 8 次运行，全部通过。
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/vs-agent-desktop-zh-dark.svg">
+    <img alt="ocu 0.7.0 对比 agent-desktop 1.3.1，同样四个任务：84 秒对 173 秒，29 次工具调用对 73 次，27 万输入 token 对 214.5 万，$0.24 对 $0.95" src="assets/vs-agent-desktop-zh-light.svg" width="820">
+  </picture>
+</p>
+
+按任务看（两次运行的中位数）：
+
+<table>
+  <tr><th>任务</th><th>工具</th><th align="right">耗时</th><th align="right">工具调用</th><th align="right">回复字符</th><th align="right">输入 token</th><th align="right">费用</th></tr>
+  <tr><td rowspan="2">计算器：789 × 36</td><td><b>ocu</b></td><td align="right"><b>7.0 s</b></td><td align="right"><b>2</b></td><td align="right"><b>1.3k</b></td><td align="right"><b>16k</b></td><td align="right"><b>$0.023</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">16.4 s</td><td align="right">6</td><td align="right">15k</td><td align="right">129k</td><td align="right">$0.099</td></tr>
+  <tr><td rowspan="2">系统设置：打开“关于本机”</td><td><b>ocu</b></td><td align="right"><b>9.8 s</b></td><td align="right"><b>3.5</b></td><td align="right"><b>6.6k</b></td><td align="right"><b>35k</b></td><td align="right"><b>$0.029</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">18.4 s</td><td align="right">6.5</td><td align="right">23k</td><td align="right">208k</td><td align="right">$0.091</td></tr>
+  <tr><td rowspan="2">Safari：打开网页并点链接</td><td><b>ocu</b></td><td align="right"><b>15.7 s</b></td><td align="right"><b>6</b></td><td align="right"><b>12k</b></td><td align="right"><b>54k</b></td><td align="right"><b>$0.045</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">35.7 s</td><td align="right">17</td><td align="right">54k</td><td align="right">545k</td><td align="right">$0.194</td></tr>
+  <tr><td rowspan="2">访达：应用程序 > 实用工具</td><td><b>ocu</b></td><td align="right"><b>9.4 s</b></td><td align="right"><b>3</b></td><td align="right"><b>6.0k</b></td><td align="right"><b>31k</b></td><td align="right"><b>$0.024</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">16.1 s</td><td align="right">7</td><td align="right">39k</td><td align="right">190k</td><td align="right">$0.093</td></tr>
+  <tr><td rowspan="2"><b>四个任务各 8 次运行（合计）</b></td><td><b>ocu</b></td><td align="right"><b>84 s</b></td><td align="right"><b>29</b></td><td align="right"><b>52k</b></td><td align="right"><b>270k</b></td><td align="right"><b>$0.24</b></td></tr>
+  <tr><td>agent-desktop</td><td align="right">173 s</td><td align="right">73</td><td align="right">262k</td><td align="right">2,145k</td><td align="right">$0.95</td></tr>
+</table>
+
+**测试设置。** 2026-11-16，MacBook Pro（M1 Max，macOS 26.7，英文界面）。
+
+- **调用方。** Claude Code 2.1.325 无头模式（`claude -p`），模型 Sonnet 5.5。不开内置工具，不读用户设置，每次运行只接一个 MCP 服务。关掉了工具搜索，所以 agent-desktop 的工具全部直接加载。
+- **ocu。** 0.7.0，去掉了模型 key，只有 `observe`、`act` 和 `screenshot`。
+- **agent-desktop。** 1.3.1，默认设置：75 个工具，后台操作。
+- **运行方式。** 每个任务开始前先把应用重置。结果在真实屏幕上检查，计算器检查回答。跑两轮，两边交替先后。费用按 API 价格折算。
+
+脚本在 [plans/assets](plans/assets/vs-agent-desktop/)。
+
+**差距从哪来**（看调用记录）：
+
+- **确认结果。** ocu 的 `act` 回复里已经带着屏幕变化。agent-desktop 每次操作后，模型都要再用 `snapshot`、`find`、`get` 或截图读一次（它的 8 次运行里截了 7 张图，ocu 一张没用）。
+- **回复大小。** 每个元素一行文字，对比完整的 JSON 树。
+- **每次运行的固定开销。** agent-desktop 每次开始都会读一遍使用指南（`skills_get`，约 1 万字符），75 个工具的定义（4.2 万字符）每次请求都要带上。
+
+**局限。** 每边 8 次，四个简单任务，一个模型，一台机器。其中三个任务来自 ocu 自己的基准测试，ocu 在这些任务上调过。agent-desktop 操作时不抢焦点，这次没有测这一项。没测工具搜索、更难的任务、Electron 应用和更小的模型。后续工作见[路线图](roadmap.zh-CN.md)。
+
+## ocu 自己的数字
+
+用 0.6.0 在 Mac mini M2、macOS 26 上测得。0.7 加了 `open` 动作和访达里的文件选中，没有改动这些路径。
+
+| helper（`bench/perf.ts`，p50） | |
+| --- | --- |
+| 读一个窗口：计算器 / 系统设置 / Safari | 25 / 59 / 86 ms |
+| 按一下 / 连按六下 | 3 / 16 ms |
+| 按键 | 1 ms |
+| 可以交给模型的截图（1280 px） | 117 ms |
+
+| MCP 工具调用，从调用方看（`bench/mcp-perf.ts`，跑两次） | |
+| --- | --- |
+| 按一下，回复里带着屏幕变化 | 155–182 ms |
+| 批量按 6 下 | 143–226 ms |
+| 切换系统设置页 | 529–627 ms |
+| 网页链接，页面加载完 | 276–486 ms |
+| 没有效果的操作（ocu 会盯 600 ms，等迟来的变化） | 640–680 ms |
+
+| 内置 agent（`bench/run.ts`，22 个任务，DeepSeek `deepseek-chat`，缓存关闭，跑两次） | |
+| --- | --- |
+| 通过 | 22/22、22/22 |
+| 每个任务的秒数 | 3.9、4.0 |
+| 每个任务的规划模型调用次数 | 2.09、2.23 |
+| 每个任务的时间：读屏幕 / 模型 / 等待 / 操作 | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
+
+内置 agent 的时间里，模型仍然占一半以上。
 
 ## 运行方法
 
-在 `core/` 下：
+基准测试会在本机上操作真实的应用，所以先把手头在用的东西关掉。在 `core/` 下：
 
 ```sh
 bun bench/run.ts                          # 内置 agent，全部任务（Jev + 规划模型）
@@ -24,97 +96,6 @@ bun bench/mcp-perf.ts <label>             # 从调用方角度测 MCP 工具调�
 - **结果**存在 `core/bench/results/`，git 会忽略它。汇总里有通过率、每个任务的规划模型调用次数，以及时间拆分：读屏幕、模型、等待和操作。
 - **动作缓存**默认关闭，除非设 `OCU_CACHE=1`。这样测的是模型，不是回放。
 - `OCU_SETTLE_LOG=1` 会在每次等屏幕稳定时打印用了多久、变化最早什么时候出现。调 `screen.ts` 里的等待时间时用它。
+- 上面那张**图**由 `bun docs/assets/vs-chart.ts` 生成；做了新的对比后，改这个文件开头的数字再跑一遍。
 
-报数字时，写清楚机器、macOS 版本、模型，并附上同一天在同一台机器上跑的上一个版本。单次结果会有波动，至少跑两次，给出范围。
-
-## 0.6.0 的结果
-
-在 Mac mini M2、macOS 26 上测，当时有一个远程桌面会话带来额外负载，所以单次数字会有波动。对比对象是同一天在同一台机器上跑的 0.5（提交 `72c21a3`）。
-
-**helper**（`bench/perf.ts`，p50）：
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| 读计算器 / 系统设置 / Safari | 43 / 82 / 149 ms | 25 / 59 / 86 ms |
-| 等待时的重复读取（quiet） | – | 27–60 ms |
-| 按一下 / 连按六下 | 174 / 1183 ms | 3 / 16 ms |
-| 按键 | 112 ms | 1 ms |
-| 可以交给模型的截图（1280 px） | 266 ms | 117 ms |
-
-**MCP 工具调用**，从调用方看（`bench/mcp-perf.ts`，12 次调用，每组跑两次）：
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| 合计 | 7.5 s | 3.9–4.5 s |
-| 按一下 | 418 ms | 155–182 ms |
-| 批量按 6 下 | 1684 ms | 143–226 ms |
-| 切换设置页 | 1201 ms | 529–627 ms |
-| 网页链接，页面加载 | 896 ms（没等到加载） | 276–486 ms |
-| 没有效果的操作 | 330–780 ms | 640–680 ms（会盯 600 ms，等迟来的变化） |
-| 8 次 act 回复的字符数 | 6.6k | 4.1–4.3k |
-
-**内置 agent**（`bench/run.ts`，22 个任务，DeepSeek `deepseek-chat`，缓存关闭）：
-
-| | 0.5 | 0.6 |
-| --- | --- | --- |
-| 通过 | 20/22 | 22/22、22/22（最终代码跑两次；调优期间另外四次是 20–22） |
-| 每个任务的秒数 | 9.8（去掉一次 85 秒的失败是 6.2） | 3.9、4.0 |
-| 每个任务的规划模型调用次数 | 4.05 | 2.09、2.23 |
-| 每个任务的时间拆分（读屏幕 / 模型 / 等待 / 操作） | – | 1.1–1.2 / 1.8 / 0.6 / 0.4 s |
-
-大部分提升来自更少的规划模型往返（批量最后以本地检查过的 `done` 结束），以及 helper 更快的操作。模型仍然占了一半以上的时间。
-
-**MCP 调用方的批量。** Claude Code（Sonnet）用一次批量 `act`，在计算器上算 789 × 36 用了 4 轮、19 秒。不用批量，同样的任务用了 11 轮、45 秒。
-
-## 和 agent-desktop 对比
-
-2026-11-16，在同一台 Mac（MacBook Pro，M1 Max，macOS 26.7，中文界面）上，让同一个模型分别通过 ocu 和 [agent-desktop](https://github.com/vercel-labs/agent-desktop) 的 MCP 服务做同样的任务。
-
-**测试设置。**
-
-- **调用方。** Claude Code 2.1.325 无头模式（`claude -p`），模型 Sonnet 5.5。不开内置工具，不读用户设置，每次运行只接一个 MCP 服务。关掉了工具搜索，所以 agent-desktop 的工具全部直接加载。
-- **ocu。** 0.6.0，去掉了模型 key，只有 `observe`、`act` 和 `screenshot`。
-- **agent-desktop。** 1.3.1，默认设置：75 个工具，后台操作。
-- **运行方式。** 每个任务开始前先把应用重置。结果在真实屏幕上检查，计算器检查回答。每组跑 2–3 次，两边交替先后。
-
-参考脚本在 [plans/assets](plans/assets/vs-agent-desktop/)。
-
-| 任务（中位数） | 工具 | 通过 | 耗时 | 轮数 | 工具调用 | 回复字符 | 输入 token | 费用 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 计算器 789 × 36 | ocu | 3/3 | 7.5 s | 3 | 2 | 1.2k | 18k | $0.008 |
-| | agent-desktop | 3/3 | 19.2 s | 8 | 7 | 19k | 137k | $0.073 |
-| 系统设置 > 关于本机 | ocu | 2/2 | 6.3 s | 2 | 1 | 2.2k | 13k | $0.009 |
-| | agent-desktop | 2/2 | 19.6 s | 8 | 7 | 29k | 222k | $0.086 |
-| Safari：打开网页并点链接 | ocu | 2/2 | 15.8 s | 5.5 | 4.5 | 12k | 48k | $0.044 |
-| | agent-desktop | 2/2 | 40.7 s | 19.5 | 18.5 | 69k | 782k | $0.240 |
-| 访达：应用程序 > 实用工具 | ocu | 2/2 | 22.6 s | 7.5 | 6.5 | 8k | 64k | $0.044 |
-| | agent-desktop | 2/2 | 33.5 s | 12.5 | 11.5 | 73k | 399k | $0.209 |
-
-两边各 9 次运行合计：ocu 用了 112 秒、31 次工具调用、4.9 万回复字符、30.6 万输入 token、$0.24；agent-desktop 用了 243 秒、95 次工具调用、40.3 万回复字符、324.9 万输入 token、$1.35。费用按 API 价格折算。
-
-**差距从哪来**（看调用记录）：
-
-- **确认结果。** ocu 的 `act` 回复里已经带着屏幕变化。agent-desktop 每次操作后，模型都要再用 `snapshot`、`find`、`get` 或截图读一次。
-- **回复大小。** 每个元素一行文字，对比完整的 JSON 树。
-- **每次运行的固定开销。** agent-desktop 每次开始都会读一遍使用指南（`skills_get`，约 1 万字符），75 个工具的定义（4.2 万字符）每次请求都要带上。去掉读指南这一步，工具调用仍差 2.7 倍，回复字符仍差 6 倍。
-- **捷径。** ocu 用 `open_url` 加系统设置链接，一次调用就到了「关于本机」；agent-desktop 没有这个动作，只能一层层点进去。
-
-**agent-desktop 做得更好的地方。** 在访达分栏视图里，它点文件夹就能打开。ocu 对那里的文件名 `press` 没有效果，模型只好截图再 `click_at`。另外它操作时不抢焦点，这次没有测这一项。
-
-**用 0.7.0 重跑。** [计划 03](plans/03-open-items.md) 修好了访达这一项：`press` 在访达的各种视图里都能选中文件，`open` 能打开它。同一天用 ocu 0.7.0 把同样的脚本又跑了两轮，这次系统界面是英文。16 次全部通过。访达任务里 ocu 用了三次调用（`open_app`、`cmd+shift+a`、对 `Cell "Utilities"` 用 `open`），没有截图：
-
-| 任务（中位数） | 工具 | 通过 | 耗时 | 轮数 | 工具调用 | 回复字符 | 输入 token | 费用 |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 计算器 789 × 36 | ocu | 2/2 | 7.0 s | 3 | 2 | 1.3k | 16k | $0.023 |
-| | agent-desktop | 2/2 | 16.4 s | 7 | 6 | 15k | 129k | $0.099 |
-| 系统设置 > 关于本机 | ocu | 2/2 | 9.8 s | 4.5 | 3.5 | 6.6k | 35k | $0.029 |
-| | agent-desktop | 2/2 | 18.4 s | 7.5 | 6.5 | 23k | 208k | $0.091 |
-| Safari：打开网页并点链接 | ocu | 2/2 | 15.7 s | 7 | 6 | 12k | 54k | $0.045 |
-| | agent-desktop | 2/2 | 35.7 s | 18 | 17 | 54k | 545k | $0.194 |
-| 访达：应用程序 > 实用工具 | ocu | 2/2 | 9.4 s | 4 | 3 | 6.0k | 31k | $0.024 |
-| | agent-desktop | 2/2 | 16.1 s | 8 | 7 | 39k | 190k | $0.093 |
-
-各 8 次合计：ocu 用了 84 秒、29 次工具调用、5.2 万回复字符、27 万输入 token，没有截图，费用 $0.24；agent-desktop 用了 173 秒、73 次工具调用、26.2 万回复字符、214.5 万输入 token、7 张截图，费用 $0.95。系统设置这一项，模型这次是一层层点进去的，没有用设置链接，所以调用次数比第一次多。第二轮进行中手动对访达跑过一次 `ocu observe`，没有哪一次因此失败或者明显异常。
-
-**局限。** 每边 9 次，四个简单任务，一个模型，一台机器。其中三个任务来自 ocu 自己的基准测试，ocu 在这些任务上调过，而且界面是中文。没测工具搜索、更难的任务、Electron 应用和更小的模型。后续工作见[路线图](roadmap.zh-CN.md)。
-
+报数字时，写清楚机器、macOS 版本和模型，并且在空闲的机器上跑：机器有负载时，耗时没法比较。单次结果会有波动，至少跑两次，给出范围。要说明提速，就在同一台机器、同一天把上一个版本也跑一遍。
