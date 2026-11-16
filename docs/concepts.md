@@ -77,7 +77,8 @@ A ref (`e112`) names one element.
 
 | Action | Fields | What it does |
 | --- | --- | --- |
-| `press` | `ref`, `extend?` | Presses a button, link, menu item, tab, cell or row. On a table row it selects the row; `extend: true` adds it to the selection |
+| `press` | `ref`, `extend?` | Presses a button, link, menu item, tab, cell or row. On a table row or a file it is a single click: it selects the item; `extend: true` adds it to the selection |
+| `open` | `ref` | A double click on a file, folder or row: opens the file or goes into the folder |
 | `set_value` | `ref`, `text` | Sets a text field's value directly |
 | `type` | `text`, `ref?` | Types text. With a `ref`, into that field; without one, into the focused field |
 | `key` | `key`, `repeat?` | A key or combination: `return`, `tab`, `escape`, `space`, `delete`, arrow keys, `cmd+n`, `cmd+shift+g`… `repeat` (up to 50) presses it again |
@@ -95,6 +96,10 @@ Some behavior applies to all actions:
   field and waits briefly for a field to take focus. Web fields get real key events.
 - Elements inside web content (browsers, Electron apps) get a real click, because those
   apps ignore the accessibility press.
+- Files in Finder and in open and save panels are listed as `Row` (list view) or `Cell`
+  (column, icon and gallery view). `press` selects one, which in column view shows a
+  folder's contents; `open` opens it. Icon and gallery view list only the files that are
+  visible.
 - Every action is refused while the screen is locked.
 - Menus are often faster than buttons: `menu{path:["Go","Downloads"]}` in Finder, or a
   shortcut such as `key{key:"cmd+n"}`.
@@ -107,7 +112,7 @@ while before ocu concludes the action did nothing: 600 ms, or 1.2 s in a browser
 page loads start late. These repeat reads are quiet: they don't raise the window or draw
 the overlay.
 
-The actions that wait like this are `press`, `menu`, `open_app`, `open_url`, `click_at`,
+The actions that wait like this are `press`, `open`, `menu`, `open_app`, `open_url`, `click_at`,
 `click_visual`, `return`, and any key combination with a modifier.
 
 ## Change replies

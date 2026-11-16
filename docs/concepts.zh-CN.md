@@ -64,7 +64,8 @@ bundle id（`com.apple.calculator`）都可以。ocu 会把这个应用的窗口
 
 | 操作 | 字段 | 作用 |
 | --- | --- | --- |
-| `press` | `ref`, `extend?` | 按下按钮、链接、菜单项、标签页、单元格或行。对表格行是选中它；`extend: true` 表示加入已有选择 |
+| `press` | `ref`, `extend?` | 按下按钮、链接、菜单项、标签页、单元格或行。对表格行和文件相当于单击：选中它；`extend: true` 表示加入已有选择 |
+| `open` | `ref` | 相当于双击文件、文件夹或行：打开文件，或者进入文件夹 |
 | `set_value` | `ref`, `text` | 直接设置输入框的值 |
 | `type` | `text`, `ref?` | 输入文字。带 `ref` 时输入到那个输入框；不带时输入到当前聚焦的输入框 |
 | `key` | `key`, `repeat?` | 一个按键或组合键：`return`、`tab`、`escape`、`space`、`delete`、方向键、`cmd+n`、`cmd+shift+g`……`repeat`（最多 50）表示重复按 |
@@ -81,6 +82,8 @@ bundle id（`com.apple.calculator`）都可以。ocu 会把这个应用的窗口
 - 不带 `ref` 的 `type` 会通过辅助功能把文字插入到当前聚焦的原生输入框，并稍等输入框获得焦点。
   网页里的输入框收到的是真实按键事件。
 - 网页内容（浏览器、Electron 应用）里的元素会收到真实的鼠标点击，因为这些应用会忽略辅助功能的按下操作。
+- 访达以及“打开”“存储”面板里的文件，在列表视图里列为 `Row`，在分栏、图标和画廊视图里列为 `Cell`。
+  `press` 选中它（分栏视图里选中文件夹就会显示它的内容），`open` 打开它。图标和画廊视图只列出看得见的文件。
 - 屏幕锁定时，所有操作都会被拒绝。
 - 菜单往往比按钮快：在访达里用 `menu{path:["前往","下载"]}`（英文系统是 `["Go","Downloads"]`），
   或者用快捷键，比如 `key{key:"cmd+n"}`。
@@ -91,7 +94,7 @@ bundle id（`com.apple.calculator`）都可以。ocu 会把这个应用的窗口
 如果屏幕完全没变，ocu 会再观察一会儿才判定操作没起作用：一般是 600 ms，浏览器里是 1.2 秒，
 因为网页加载开始得晚。这些重复读取是静默的：不会把窗口提到前面，也不会画覆盖层。
 
-会这样等待的操作有：`press`、`menu`、`open_app`、`open_url`、`click_at`、`click_visual`、`return`，
+会这样等待的操作有：`press`、`open`、`menu`、`open_app`、`open_url`、`click_at`、`click_visual`、`return`，
 以及任何带修饰键的组合键。
 
 ## 变化回复

@@ -20,6 +20,7 @@ export type Element = { ref: string; role: string; label: string; f?: [number, n
 export type Observation = { app: string; window: string; window_id?: number; sheet?: string; elements: Element[]; others?: string[]; error?: string };
 export type Action =
   | { action: "press"; ref: string; extend?: boolean }
+  | { action: "open"; ref: string }
   | { action: "set_value"; ref: string; text: string }
   | { action: "type"; text: string; ref?: string }
   | { action: "key"; key: string; repeat?: number }

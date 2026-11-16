@@ -68,7 +68,7 @@ In implementation order.
 | --- | --- | --- | --- | --- |
 | 01 | [Reproducible comparison benchmark](plans/01-vs-benchmark.md) | P0 | – | planned |
 | 02 | [CI and a version command](plans/02-ci-and-version.md) | P0 | – | planned |
-| 03 | [Opening items in Finder and file views](plans/03-open-items.md) | P0 | (01) | planned |
+| 03 | [Opening items in Finder and file views](plans/03-open-items.md) | P0 | (01) | done |
 | 04 | [Fixture app and local end-to-end tests](plans/04-fixture-app.md) | P1 | – | planned |
 | 05 | [Electron apps and dense windows](plans/05-electron-and-dense-apps.md) | P1 | (01, 04) | planned |
 | 06 | [Working without taking focus](plans/06-background-operation.md) | P1 | 04, 01 | planned |

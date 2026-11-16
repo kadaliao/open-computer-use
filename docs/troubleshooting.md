@@ -64,8 +64,6 @@ frontmost app.
 
 ## Known limits
 
-- **Finder column and icon views.** Items there can't be opened with `press`. Use the Go
-  menu (`menu{path:["Go","Utilities"]}`) or `open_url` with a `file://` URL.
 - **Electron apps that expose no page content.** Clicks on web content in them are
   unverified.
 - **Safari Reader mode** hides parts of a page (a Wikipedia infobox, for example) from

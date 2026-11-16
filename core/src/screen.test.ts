@@ -183,6 +183,11 @@ group("MCP batches (act then:[...])", () => {
     expect(n.log).toEqual(["run key cmd+n", "wait known", "run type"]);
     expect(r.screen).toBe(shape(scr([el("e9", "TextArea", "")], "未命名 2", 9)));  // the final wait starts from there
   });
+  test("open (a double click on a file or folder) changes the screen: the next step waits for it", async () => {
+    const k = recorder();
+    await runSteps([{ action: "open", ref: "e1" }, { action: "press", ref: "e2" }], k.run, k.wait, "s");
+    expect(k.log).toEqual(["run open e1", "wait known", "run press e2"]);
+  });
   test("stops at the first error", async () => {
     const k = recorder("e2");
     const r = await runSteps([{ action: "press", ref: "e1" }, { action: "press", ref: "e2" }, { action: "press", ref: "e3" }], k.run, k.wait);

@@ -60,7 +60,7 @@ export async function settle(read: (quiet: boolean) => Promise<Observation>,
   return prev;
 }
 
-const CHANGERS = ["press", "menu", "open_app", "open_url", "click_visual", "click_at"];
+const CHANGERS = ["press", "open", "menu", "open_app", "open_url", "click_visual", "click_at"];
 /** Actions after which the screen is expected to change (so refs may be gone and the next step must wait). */
 export const changesUI = (a: { action: string; key?: string }) => CHANGERS.includes(a.action) ||
   (a.action === "key" && !!a.key && (a.key.includes("+") || a.key === "return"));

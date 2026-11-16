@@ -27,6 +27,16 @@ export const tasks: Task[] = [
   { id: "settings-about", goal: "打开系统设置，进入“通用”里的“关于本机”页面", setup: "open 'x-apple.systempreferences:com.apple.wifi-settings-extension'", verify: /window: (关于本机|About)/ },
   { id: "settings-display", goal: "打开系统设置里的显示器页面", setup: "open 'x-apple.systempreferences:com.apple.wifi-settings-extension'", verify: /window: (显示器|Displays)/ },
   { id: "finder-utilities", goal: "在访达里打开“应用程序”文件夹，再进入其中的“实用工具”文件夹", setup: "open ~/Documents", verify: /window: (实用工具|Utilities)/ },
+  // File views (plan 03): the folder has to be opened from the file list itself, in each Finder view and in an
+  // open panel. The fixture is a folder made for the run, so the Go menu can't stand in for the file list.
+  ...(["icon", "list", "column"] as const).map((v): Task => ({ id: `finder-open-${v}`,
+    goal: `访达窗口里显示着 ${TOKEN}-${v} 文件夹的内容，进入其中的 alpha 文件夹，再进入里面的 inner-${TOKEN} 文件夹`,
+    setup: `mkdir -p ~/Downloads/${TOKEN}-${v}/alpha/inner-${TOKEN} ~/Downloads/${TOKEN}-${v}/beta && open ~/Downloads/${TOKEN}-${v} && sleep 1 && ` +
+      osa(`tell application "Finder" to set current view of front Finder window to ${v} view`),
+    verify: re(`window: inner-${TOKEN}`), cleanup: `rm -r ~/Downloads/${TOKEN}-${v}` })),
+  { id: "panel-open-folder", goal: `在文本编辑里按 cmd+o 调出“打开”面板，在面板里进入“下载”文件夹里的 ${TOKEN}-panel 文件夹（不要打开文件，停在面板里）`,
+    setup: `mkdir -p ~/Downloads/${TOKEN}-panel/inner-${TOKEN} && open -a TextEdit`, verify: re(`inner-${TOKEN}`),
+    cleanup: `${osa('tell application "System Events" to key code 53')}; rm -r ~/Downloads/${TOKEN}-panel` },
   { id: "safari-link", goal: "在 Safari 打开 example.com，然后点击页面上的链接", setup: "open -a Safari https://www.apple.com/cn/", verify: /iana/i },
 
   // Harder: cross-app, multi-stage, or needs reading + reasoning.
