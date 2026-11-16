@@ -424,6 +424,27 @@ describe("desktop findings", () => {
   });
 });
 
+describe("press names its element", () => {
+  const calc = () => { const pressed: string[] = []; return { pressed, d: new Fake("计算器", "计算器", [el("e11", "Button", "4"), el("e12", "Button", "5"), el("e13", "Button", "加"), el("e14", "Row", "alpha | 今天 | --"), el("e15", "Button", "好"), el("e16", "Button", "好")], (a) => { if (a.action === "press") pressed.push(a.ref!); }) }; };
+  const pressL = (ref: string, label: string) => ({ action: "press", ref, label }) as unknown as Step;
+  test("a miscopied ref is replaced by the one element with that label", async () => {
+    const c = calc(), p = planner([pressL("e11", "5"), pressL("e13", "加")], [{ action: "done", summary: "ok" }]);
+    await runTask("按 5 再按加", { driver: c.d, decide: p.decide, noCache: true });
+    expect(c.pressed).toEqual(["e12", "e13"]);
+  });
+  test("a label that is part of the element's label passes (a row with columns)", async () => {
+    const c = calc(), p = planner([pressL("e14", "alpha")], [{ action: "done", summary: "ok" }]);
+    await runTask("选中 alpha", { driver: c.d, decide: p.decide, noCache: true });
+    expect(c.pressed).toEqual(["e14"]);
+  });
+  test("with several candidates the step is refused and the planner is told", async () => {
+    const c = calc(), p = planner([pressL("e11", "好")], [{ action: "done", summary: "ok" }]);
+    await runTask("按好", { driver: c.d, decide: p.decide, noCache: true });
+    expect(c.pressed).toEqual([]);
+    expect(p.calls[1].history.at(-1)).toContain('e11 is Button "4", not "好"');
+  });
+});
+
 describe("tab after a screen change", () => {
   // TextEdit: cmd+f shows a find bar with one field; there is no replace field for tab to reach.
   const editor = () => new Fake("文本编辑", "未命名", [el("e11", "TextArea", "ocu apple apple apple")], (a, f) => {
@@ -494,6 +515,19 @@ describe("apps that hand out new refs on every read", () => {
     await runTask("x", { driver: f, decide: p.decide, noCache: true });
     expect(f.log.filter((x) => x.startsWith("press")).length).toBe(1);
     expect(p.calls[2].history.at(-1)).toContain("skipped: it had no visible effect");
+  });
+});
+
+describe("a planner stuck on an action that does nothing", () => {
+  test("is told more bluntly, then stopped after four skipped turns", async () => {
+    const f = new Fake("App", "w", [el("e5", "Button", "Dead")]);
+    const again = () => [{ action: "key", key: "cmd+shift+d" } as Step];
+    const p = planner(again, again, again, again, again, again, again);
+    const r = await runTask("x", { driver: f, decide: p.decide, noCache: true });
+    expect(r.ok).toBe(false);
+    expect(r.summary).toContain("stuck");
+    expect(r.turns).toBe(5);  // one real try, four skipped
+    expect(p.calls[3].history.at(-1)).toContain("skipped again (2 times in a row)");
   });
 });
 

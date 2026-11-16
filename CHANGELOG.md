@@ -15,11 +15,19 @@ screen format or tool behavior; such changes are listed under **Changed**.
   numbers (seen in System Settings during a page change).
 - The built-in agent no longer accepts `done` after the first of two steps when the
   goal names the second without quotes (for example a folder called `inner-x1`).
+- A planner that copies the wrong ref no longer presses the wrong element: `press` and
+  `open` steps now name the element's label, and the built-in agent checks it against
+  the ref. With one element of that label, that element is used; otherwise the step is
+  refused and the planner looks again.
+- A planner that keeps sending an action that does nothing is told so more bluntly, and
+  the task stops after four such turns instead of running to the step limit.
+- In an open or save panel the planner goes to a folder by its path (`cmd+shift+g`)
+  instead of clicking through the sidebar: 2 planner calls, where it took 10 to 15.
 
 ### Changed
 
-- `docs/benchmarks.md` keeps only the latest measurements, and the comparison with
-  agent-desktop is a chart, also shown in the README.
+- `docs/benchmarks.md` keeps only the comparison with agent-desktop, now a chart that
+  the README also shows, and how to run the benchmarks.
 - The benchmark closes the Safari tabs it opens, waits for a page that is still
   loading before it checks the outcome, and cleans up on an English system too.
 

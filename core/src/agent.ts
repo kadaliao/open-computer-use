@@ -135,6 +135,25 @@ export function unseenClaim(summary: string, goal: string, now: Observation, his
   }
 }
 
+/**
+ * Checks a step's "label" against the element its ref points at on the planned screen, and drops the field.
+ * Labels match when equal after norm(), or when one starts with the other (the list cuts long labels).
+ */
+function named_(step: Step, plan: Observation): { step: Step; error?: string } {
+  const { label, ...rest } = step as Step & { label?: unknown; ref?: string };
+  const bare = rest as Step, ref = (rest as { ref?: string }).ref;
+  if (typeof label !== "string" || !ref || !plan.elements) return { step: bare };
+  const want = norm(label), same = (e: Element) => norm(e.label) === want;
+  // A row's label may carry more columns ("alpha | Today | --") and long labels are cut: the name being in it is enough.
+  const fits = (e: Element) => { const l = norm(e.label); return l === want || has(l, want) || (want.length >= 20 && want.startsWith(l)); };
+  const at = plan.elements.find((e) => e.ref === ref);
+  // An element without a label has nothing to compare (the planner then writes its role, or nothing).
+  if (!want || !at || !norm(at.label) || fits(at)) return { step: bare };
+  const exact = plan.elements.filter(same), others = exact.length ? exact : plan.elements.filter(fits);
+  if (others.length === 1) return { step: { ...bare, ref: others[0].ref } as Step };
+  return { step: bare, error: `refused: ${ref} is ${at.role} "${at.label}", not "${label}"${others.length ? ` (${others.length} elements have that label: ${others.map((e) => e.ref).join(", ")})` : " (nothing on screen has that label)"}. Read the list again and use the right ref` };
+}
+
 // After the screen changed, a batch goes on with steps that don't point at an element of the old screen, and with
 // those whose element is still there unchanged (kept() below); anything else waits for the planner to look.
 const REFLESS = new Set(["key", "type", "menu", "open_app", "open_url", "find_text", "read_visual", "note", "done"]);
@@ -251,6 +270,7 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
   const say: Say = (line, key = line.split(" ")[0]) => { history.push(line); keys.push(key); };
   let turns = 0;                           // planner round trips
   let lastAct = { key: "", screen: "" };  // last action and the screen it ran on
+  let skips = 0;                           // turns in a row that only repeated an action known to do nothing
   const record: cache.CachedStep[] = [];   // successful steps, for the cache
   let cacheable = true;
   let replayedAll = false;
@@ -383,9 +403,15 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
           break;
         }
         if (k === 0 && same === lastAct.key && screen === lastAct.screen) {
-          say(`${key} -> skipped: it had no visible effect last time; choose a different action or approach`, same);
+          // A planner that keeps sending it anyway is told more bluntly, then stopped: ten more turns of the same
+          // step cost time and money and end the same way.
+          skips++;
+          say(skips === 1 ? `${key} -> skipped: it had no visible effect last time; choose a different action or approach`
+            : `${key} -> skipped again (${skips} times in a row): it does nothing on this screen, so do not send it again. ` +
+              `Read the element list and act on a listed element, use a menu action, or try another key`, same);
           const s = push({ step, error: "skipped (no effect last time)" }, { wait_ms: wait });
           log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> skipped (no effect last time)`);
+          if (skips >= 4) return finish(false, `stuck: ${key} has no effect here and the planner kept repeating it`);
           break;
         }
         if (k === 0) lastAct = { key: same, screen };
@@ -393,14 +419,26 @@ export async function runTask(goal: string, opts: { maxSteps?: number; log?: (s:
         // or that change would pass for this step's effect.
         if (changesUI(step) && stale && !unsettled) { cur = await read(true); stale = false; }
         const ranOn = shape(cur);
-        const res = await perform(driver, step).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
-        const s = push({ step, target: res.target, error: res.error, via: res.via }, { wait_ms: wait, act_ms: lap() });
+        // The planner names the element it means ("label") next to the ref. Refs are opaque numbers and get miscopied
+        // (e111 "4" for e112 "5"); the label is what it intended. When they disagree, the one element with that label
+        // is used; with none or several, the step is refused and the planner looks again.
+        const named = named_(step, plan);
+        if (named.error) {
+          say(`${key} -> ${named.error}`, same);
+          const s = push({ step, error: "ref and label disagree" }, { wait_ms: wait });
+          log(`[${i}] ${tier} ${fmtTime(s)}ms ${key} -> ${named.error}`);
+          break;
+        }
+        const run = named.step;
+        skips = 0;
+        const res = await perform(driver, run).catch((e) => ({ error: String(e) }) as Awaited<ReturnType<typeof perform>>);
+        const s = push({ step: run, target: res.target, error: res.error, via: res.via }, { wait_ms: wait, act_ms: lap() });
         if (!res.error) {
           // A ref step runs on `plan`, or on a later screen where its element was kept (same ref, role, label).
-          const ref = (step as any).ref;
+          const ref = (run as any).ref;
           const at = ref ? cache.nthOf(plan, ref) : null;
           if (ref && !at) cacheable = false;
-          else if (step.action !== "note") record.push({ step: Object.fromEntries(Object.entries(step).filter(([k]) => k !== "ref")), ...(at ?? {}) });
+          else if (run.action !== "note") record.push({ step: Object.fromEntries(Object.entries(run).filter(([k]) => k !== "ref")), ...(at ?? {}) });
           if (["read_visual", "find_text", "note"].includes(step.action)) cacheable = false;
         }
         const line = `${key}${res.target ? ` [${res.target}]` : ""} -> ${res.error ?? "ok"}${res.note ? `\n  answer: ${res.note}` : ""}`;

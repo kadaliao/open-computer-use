@@ -59,9 +59,8 @@ The per-task numbers, the setup and the limits of the test are in
 - **Batches.** Several steps go in one call; between steps that change the screen, ocu
   waits for it to settle. Claude Code computed 789 × 36 on Calculator in 4 turns and 19 s
   with batching, 11 turns and 45 s without.
-- **Fast.** A press takes a few milliseconds in the helper and reading a window
-  30–130 ms. The built-in agent passes 25 or 26 of its 26 benchmark tasks at about 5 s
-  and 3 planner calls each ([benchmarks](docs/benchmarks.md#ocu-on-its-own)).
+- **Fast.** A press takes a few milliseconds in the helper and reading a window tens of
+  milliseconds, so the time goes to the model, not to the tool.
 - **Screenshot fallback.** For canvas apps, games and some Electron apps, a vision model
   can locate and click what the accessibility tree doesn't list. This is optional.
 - **Action cache.** The built-in agent saves tasks that worked and replays them, with new
@@ -174,7 +173,7 @@ acts, and every action is refused while the screen is locked.
 | [Configuration](docs/configuration.md) | Every environment variable, and model choices for planning and vision |
 | [Troubleshooting](docs/troubleshooting.md) | Permissions, common errors, known limits |
 | [Architecture](docs/architecture.md) | How the helper and the core fit together, and the helper protocol |
-| [Benchmarks](docs/benchmarks.md) | The comparison with agent-desktop, ocu's own numbers, and how to measure |
+| [Benchmarks](docs/benchmarks.md) | The comparison with agent-desktop, and how to run the benchmarks |
 | [Roadmap](docs/roadmap.md) | Where ocu is going, and a plan for each piece of work |
 | [Contributing](CONTRIBUTING.md) | Development setup, tests, conventions |
 | [Changelog](CHANGELOG.md) | What changed in each version |

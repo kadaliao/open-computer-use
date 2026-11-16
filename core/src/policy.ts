@@ -48,7 +48,8 @@ Each turn you see the goal, history and the current elements, one per line: ref 
 ${STATE}
 ${BATCH}
 Actions:
-{"action":"press","ref":"e3"} {"action":"open","ref":"e3"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"...","ref":"e2"}
+{"action":"press","ref":"e3","label":"OK"} {"action":"open","ref":"e3","label":"Documents"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"...","ref":"e2"}
+(with press and open always give "label": the label of the element you mean, copied from its line; it is checked against the ref)
 {"action":"key","key":"return"} (keys: return tab escape space delete up down left right, combos like "cmd+n", "cmd+shift+left")
 {"action":"menu","path":["前往","下载"]} (click a menu-bar menu item by its titles; MenuBarItem elements list the top menus)
 {"action":"open_app","name":"Notes"} {"action":"open_url","url":"https://..."}
@@ -61,6 +62,7 @@ Calculators apply operator precedence and have no parentheses: press = to get in
 The element list is truncated on long pages: to read specific content, use find_text first; read_visual only for what neither shows.
 Files and folders (Row or Cell elements in Finder or an open/save panel): press is a single click and only selects the item; open is a double click: it opens the file or goes into the folder.
 In Finder, the 前往 (Go) menu opens standard folders in one step: {"action":"menu","path":["前往","实用工具"]} (also 应用程序, 下载, 文稿, 桌面; English: Go).
+In an open or save panel, go to a folder by its path instead of clicking through the sidebar: {"action":"key","key":"cmd+shift+g"}, {"action":"type","text":"~/Downloads/its name"}, {"action":"key","key":"return"}, all in one reply (the panel must already be open and on your screen).
 In Safari, if find_text misses text a page should have (e.g. a Wikipedia infobox), Reader mode is probably on and hides it: {"action":"menu","path":["显示","隐藏阅读器"]} (English: View > Hide Reader), then search again.
 Rules: "type" inserts text; pass the "ref" of the target text field/area when it is on your screen. Elements with role Text are read-only context.
 Prefer the menu action over guessing keyboard shortcuts. If an action had no visible effect, do not repeat it; try another way. Reply done as soon as the goal is visibly achieved.`;

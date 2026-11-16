@@ -13,9 +13,9 @@ const re = (s: string) => new RegExp(s, "i");
 const closeUntitled = osa('tell application "TextEdit" to close (every document whose name starts with "未命名" or name starts with "Untitled") saving no');
 
 export const tasks: Task[] = [
-  { id: "notes-new", goal: `在备忘录里新建一条备忘录，内容写 ${TOKEN} notes`, setup: "open -a Notes", verify: re(`${TOKEN} notes`) },
-  { id: "textedit-type", goal: `在文本编辑里新建一个文稿，输入 ${TOKEN} textedit`, setup: "open -a TextEdit", verify: re(`${TOKEN} textedit`), cleanup: closeUntitled },
-  { id: "textedit-bold", goal: `在文本编辑里新建一个文稿，输入 ${TOKEN} bold，然后全选并设为粗体`, setup: "open -a TextEdit", verify: re(`${TOKEN} bold`), cleanup: closeUntitled },
+  { id: "notes-new", goal: `在备忘录里新建一条备忘录，内容写“${TOKEN} notes”`, setup: "open -a Notes", verify: re(`${TOKEN} notes`) },
+  { id: "textedit-type", goal: `在文本编辑里新建一个文稿，输入“${TOKEN} textedit”`, setup: "open -a TextEdit", verify: re(`${TOKEN} textedit`), cleanup: closeUntitled },
+  { id: "textedit-bold", goal: `在文本编辑里新建一个文稿，输入“${TOKEN} bold”，然后全选并设为粗体`, setup: "open -a TextEdit", verify: re(`${TOKEN} bold`), cleanup: closeUntitled },
   { id: "calc-mul", goal: "用计算器算 37 乘以 12，把结果告诉我", setup: "open -a Calculator", verify: (s) => s.includes("444") },
   { id: "calc-add", goal: "用计算器算 1234 加 5678，把结果告诉我", setup: "open -a Calculator", verify: (s) => /6,?912/.test(s) },
   { id: "finder-downloads", goal: "在访达里打开“下载”文件夹", setup: "open ~/Documents", verify: /window: (下载|Downloads)/ },

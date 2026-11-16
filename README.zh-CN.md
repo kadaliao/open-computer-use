@@ -53,8 +53,7 @@ open-computer-use（`ocu`）读取 Mac 应用的辅助功能树（accessibility 
   要么在弹出新窗口或对话框时给出整屏。调用方不需要再单独看一次。
 - **批量操作。** 一次调用里可以放好几步；在会改变屏幕的步骤之间，ocu 会等屏幕稳定。
   Claude Code 在计算器里算 789 × 36，用批量 4 轮、19 秒；不用批量要 11 轮、45 秒。
-- **快。** helper 里一次按下只要几毫秒，读一个窗口 30–130 ms。内置 agent 的 26 个基准任务能过 25 到 26 个，
-  每个任务约 5 秒、3 次规划模型调用（[基准测试](docs/benchmarks.zh-CN.md#ocu-自己的数字)）。
+- **快。** helper 里一次按下只要几毫秒，读一个窗口几十毫秒，时间花在模型上，不花在工具上。
 - **截图兜底。** 对画布类应用、游戏和部分 Electron 应用，视觉模型可以定位并点击辅助功能树里没有的东西。
   这一项是可选的。
 - **动作缓存。** 内置 agent 会保存成功过的任务，下次换了数字或引号里的文字也能直接重放，不调用模型。
@@ -159,7 +158,7 @@ ocu 用你的权限操作你真实的桌面。光标覆盖层会显示它在哪�
 | [配置](docs/configuration.zh-CN.md) | 所有环境变量，以及规划和视觉模型的选择 |
 | [故障排查](docs/troubleshooting.zh-CN.md) | 权限、常见错误、已知限制 |
 | [架构](docs/architecture.zh-CN.md) | helper 和 core 怎么配合，以及 helper 协议 |
-| [基准测试](docs/benchmarks.zh-CN.md) | 和 agent-desktop 的对比、ocu 自己的数字，以及怎么测 |
+| [基准测试](docs/benchmarks.zh-CN.md) | 和 agent-desktop 的对比，以及怎么跑基准测试 |
 | [路线图](docs/roadmap.zh-CN.md) | ocu 接下来往哪走，以及每项工作的计划 |
 | [参与贡献](CONTRIBUTING.zh-CN.md) | 开发环境、测试、约定 |
 | [更新日志](CHANGELOG.zh-CN.md) | 每个版本改了什么 |

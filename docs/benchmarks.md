@@ -2,11 +2,10 @@
 
 **English** · [简体中文](benchmarks.zh-CN.md)
 
-How ocu performs: against another tool, and on its own. Only the latest measurements are
-kept here; the [changelog](../CHANGELOG.md) has what each release changed.
+How ocu compares with another tool, and how to run its own benchmarks. Only the latest
+measurements are kept here; the [changelog](../CHANGELOG.md) has what each release changed.
 
 - [Compared with agent-desktop](#compared-with-agent-desktop)
-- [ocu on its own](#ocu-on-its-own)
 - [Running them](#running-them)
 
 ## Compared with agent-desktop
@@ -65,38 +64,6 @@ The scripts are in [plans/assets](plans/assets/vs-agent-desktop/).
 come from ocu's own benchmark, which ocu has been tuned on. agent-desktop works without
 taking focus, which this comparison didn't measure. Tool search, harder tasks, Electron
 apps and smaller models were not tested. The [roadmap](roadmap.md) lists the follow-ups.
-
-## ocu on its own
-
-Measured on 2026-11-16 on a Mac mini (M2, macOS 26.7) with the code after 0.7.1. The
-machine was busy with other work during these runs (load average above 20), so the times
-are on the slow side.
-
-| Helper (`bench/perf.ts`, p50) | |
-| --- | --- |
-| Read a window: Calculator / Safari / System Settings | 29 / 59 / 125 ms |
-| Press, one / six in a row | 7 / 42 ms |
-| Key | 1 ms |
-| Screenshot ready for a model (1280 px) | 77 ms |
-
-| MCP tool call, as the caller sees it (`bench/mcp-perf.ts`, two runs) | |
-| --- | --- |
-| One press, with the reply that says what changed | 274–325 ms |
-| Batch of 6 presses | 241–296 ms |
-| System Settings page change | 558–561 ms |
-| Web link, page loaded | 456–703 ms |
-| Action with no effect (ocu watches 600 ms for a late change) | 616–670 ms |
-
-| Built-in agent (`bench/run.ts`, 26 tasks, DeepSeek `deepseek-chat`, cache off, two runs) | |
-| --- | --- |
-| Passed | 26/26, 25/26 |
-| Seconds per task | 5.3, 5.1 |
-| Planner calls per task | 3.35, 3.12 |
-| Time per task: reading the screen / model / waits / actions | 1.3–1.4 / 2.7–2.9 / 0.5–0.6 / 0.4 s |
-
-The one failure was `panel-open-folder`, which ran out of steps: finding a folder inside
-an open panel takes the planner 10 to 15 calls. The model is more than half of the
-built-in agent's time.
 
 ## Running them
 
