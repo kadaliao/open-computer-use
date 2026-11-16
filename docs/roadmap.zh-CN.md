@@ -55,7 +55,7 @@ ocu 是让调用方花最少轮数和 token 的 macOS 操作层，外加一个�
 | --- | --- | --- | --- | --- |
 | 01 | [可复现的对比基准](plans/01-vs-benchmark.md) | P0 | – | 计划中 |
 | 02 | [CI 和版本命令](plans/02-ci-and-version.md) | P0 | – | 计划中 |
-| 03 | [在访达和文件视图里打开项目](plans/03-open-items.md) | P0 | (01) | 计划中 |
+| 03 | [在访达和文件视图里打开项目](plans/03-open-items.md) | P0 | (01) | 已完成 |
 | 04 | [夹具应用和本地端到端测试](plans/04-fixture-app.md) | P1 | – | 计划中 |
 | 05 | [Electron 应用和密集窗口](plans/05-electron-and-dense-apps.md) | P1 | (01, 04) | 计划中 |
 | 06 | [不抢焦点地操作](plans/06-background-operation.md) | P1 | 04, 01 | 计划中 |

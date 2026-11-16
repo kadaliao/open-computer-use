@@ -44,7 +44,9 @@ Picking an action:
 - Commands are often faster through menu{path:[...]} or a shortcut key{key:"cmd+n"} than through buttons.
 - Long pages: find_text{text} searches the whole window, including off-screen content.
 - Lists: a "showing N of M rows" line means rows are hidden: scroll{ref,direction} it, or find_text.
-- Table rows (files in Finder, mails): press{ref} on a row or its name selects it; press{ref, extend:true} adds it to the selection.
+- Rows and file items (files in Finder or an open/save panel, mails): press{ref} is a single click: it selects the item (in Finder's
+  column view that shows a folder's contents); press{ref, extend:true} adds it to the selection. open{ref} is a double click: it opens
+  the file or goes into the folder.
 - Repeated keys: key{key:"down", repeat:5} instead of listing the same key many times.
 - Finder sizes: select the folder and use cmd+i; with many files selected, use cmd+ctrl+i (one summary window), not cmd+i (one window per file).
 - Open things with open_app / open_url instead of clicking around Finder or the Dock.
@@ -92,7 +94,7 @@ server.tool("observe",
   async ({ app }) => { if (app) lastApp = app; lastObs = await driver.observe(lastApp); diffsInRow = 0; return text(render(lastObs)); });
 
 const one = {
-  action: z.enum(["press", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at", "scroll"]),
+  action: z.enum(["press", "open", "set_value", "type", "key", "open_app", "open_url", "menu", "find_text", "click_at", "scroll"]),
   ref: z.string().optional(), text: z.string().optional(), key: z.string().optional(), name: z.string().optional(),
   url: z.string().optional(), path: z.array(z.string()).optional(), x: z.number().optional(), y: z.number().optional(),
   repeat: z.number().int().min(1).max(50).optional(), extend: z.boolean().optional(),
@@ -106,7 +108,7 @@ async function run(a: any) {
 }
 server.tool("act",
   "Perform one action, then return what changed on screen (see the server instructions; first time or after a big change, the full screen). " +
-  "press{ref, extend?} (on a table row: select it; extend adds to selection) | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key, repeat?} e.g. \"cmd+shift+g\", \"return\" | scroll{ref?, direction, amount?} | " +
+  "press{ref, extend?} (on a row or file: select it; extend adds to selection) | open{ref} double click: open a file, folder or row | set_value{ref,text} | type{text, ref?} (ref = insert into that field) | key{key, repeat?} e.g. \"cmd+shift+g\", \"return\" | scroll{ref?, direction, amount?} | " +
   "open_app{name} | open_url{url} | menu{path:[\"File\",\"New Folder\"]} | find_text{text} search the whole window, incl. off-screen text | " +
   "click_at{x,y} global screen point. Keyboard actions bring the observed app forward first. " +
   "Work from refs: the reply already shows the new screen (menus and popups included), so don't take your own screenshots or guess coordinates; " +

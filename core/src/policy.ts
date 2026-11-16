@@ -18,7 +18,7 @@ A "dialog open" line under the window means a sheet or alert is up; its controls
 // What a batch may contain. The loop in agent.ts enforces the same rules: keep the two in step.
 const BATCH = `Send in one reply every step you can already predict, one JSON object per line. They run in order:
 - Steps with a ref act on the screen you were shown. Refs are stable: an element keeps its ref while it is on screen.
-- After a step that changes the screen (press, menu, open_app, open_url, a key combo or return), the batch waits for
+- After a step that changes the screen (press, open, menu, open_app, open_url, a key combo or return), the batch waits for
   the screen to settle, then goes on with steps that need no ref (key, type without ref, menu, open_app, open_url,
   find_text, read_visual, note, done) and with steps whose element is still there unchanged after a small change
   (select all, then press Bold). Any other step with a ref ends the batch; you then see the new screen.
@@ -48,7 +48,7 @@ Each turn you see the goal, history and the current elements, one per line: ref 
 ${STATE}
 ${BATCH}
 Actions:
-{"action":"press","ref":"e3"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"...","ref":"e2"}
+{"action":"press","ref":"e3"} {"action":"open","ref":"e3"} {"action":"set_value","ref":"e2","text":"..."} {"action":"type","text":"...","ref":"e2"}
 {"action":"key","key":"return"} (keys: return tab escape space delete up down left right, combos like "cmd+n", "cmd+shift+left")
 {"action":"menu","path":["前往","下载"]} (click a menu-bar menu item by its titles; MenuBarItem elements list the top menus)
 {"action":"open_app","name":"Notes"} {"action":"open_url","url":"https://..."}
@@ -59,6 +59,7 @@ Actions:
 ${DONE}
 Calculators apply operator precedence and have no parentheses: press = to get intermediate results first.
 The element list is truncated on long pages: to read specific content, use find_text first; read_visual only for what neither shows.
+Files and folders (Row or Cell elements in Finder or an open/save panel): press is a single click and only selects the item; open is a double click: it opens the file or goes into the folder.
 In Finder, the 前往 (Go) menu opens standard folders in one step: {"action":"menu","path":["前往","实用工具"]} (also 应用程序, 下载, 文稿, 桌面; English: Go).
 In Safari, if find_text misses text a page should have (e.g. a Wikipedia infobox), Reader mode is probably on and hides it: {"action":"menu","path":["显示","隐藏阅读器"]} (English: View > Hide Reader), then search again.
 Rules: "type" inserts text; pass the "ref" of the target text field/area when it is on your screen. Elements with role Text are read-only context.

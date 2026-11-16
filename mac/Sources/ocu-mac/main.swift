@@ -99,7 +99,8 @@ struct Target {
   let role: String
   let info: String          // "Button 7", echoed back as the act's target
   let web: Bool             // inside a web area: pages ignore AXPress, so it gets a real click
-  let row: AXUIElement?     // the table row it sits in (itself, or up to 3 levels up)
+  let row: AXUIElement?     // what selects it: the table row it sits in (itself, or up to 3 levels up), or a
+                            // file item's group in Finder's column, icon and gallery views
 }
 // Refs are stable: an element keeps its number across observes for the helper's whole life, a new element
 // gets a fresh one, and a number is never handed to a different element. This only works for apps that keep
@@ -133,11 +134,12 @@ let valueRoles: Set<String> = ["AXTextField", "AXTextArea", "AXSearchField", "AX
 /// One element per line in the caller's view: a text area's line breaks would split its entry.
 func oneLine(_ s: String) -> String { s.contains(where: \.isNewline) ? s.split(whereSeparator: \.isNewline).joined(separator: " ") : s }
 
-func item(_ e: AXUIElement, _ n: Node, role: String, label raw: String, web: Bool, row: AXUIElement?) -> [String: Any]? {
+/// `shown`: the role the caller sees when it differs from the real one (a file's name field is listed as a Cell).
+func item(_ e: AXUIElement, _ n: Node, role: String, label raw: String, web: Bool, row: AXUIElement?, shown: String? = nil) -> [String: Any]? {
   let ref = "e\(number(e))"
   if live[ref] != nil { return nil }  // reached twice in one walk
   let label = oneLine(raw)
-  let r = String(role.dropFirst(2)).replacingOccurrences(of: "StaticText", with: "Text")
+  let r = shown ?? String(role.dropFirst(2)).replacingOccurrences(of: "StaticText", with: "Text")
   live[ref] = Target(el: e, role: role, info: "\(r) \(label)", web: web, row: row)
   var it: [String: Any] = ["ref": ref, "role": r, "label": label]
   if let f = n.frame { it["f"] = [Int(f.minX), Int(f.minY), Int(f.width), Int(f.height)] }
@@ -150,7 +152,11 @@ func item(_ e: AXUIElement, _ n: Node, role: String, label raw: String, web: Boo
   return it
 }
 
-struct Walk { var depth = 0, inRow = false, web = false, row: AXUIElement? = nil, rowDepth = 0, inSheet = false }
+// inList: the parent is an AXList. group: the parent, when it is a group right under a list, which is how Finder
+// (and open/save panels) hold a file in column view (AXList > AXGroup > AXImage + AXTextField "name") and in icon
+// and gallery view (AXList > AXList > AXGroup > AXImage "name"). List view uses AXOutline > AXRow like any table.
+struct Walk { var depth = 0, inRow = false, web = false, row: AXUIElement? = nil, rowDepth = 0, inSheet = false,
+  inList = false, group: AXUIElement? = nil }
 
 // A sheet or dialog in the observed window ("Replace?" after cmd+s slides down inside the same window):
 // its title, else its first text, else "". Callers must not take the screen for done while one is up.
@@ -166,6 +172,20 @@ func collect(_ e: AXUIElement, _ w: Walk, node: Node? = nil, out: inout [[String
   var next = w; next.depth += 1
   if role == "AXWebArea" { next.web = true }
   if role == "AXRow" { next.row = e; next.rowDepth = w.depth }
+  next.inList = role == "AXList"
+  next.group = role == "AXGroup" && w.inList ? e : nil
+  // A file in such a group: the element that carries AXFilename (the name field in column view, the icon in
+  // icon view). It is listed as a Cell: models don't press text fields, and an image isn't listed at all
+  // otherwise. A name being edited (it has focus) stays a text field. One extra read per file shown. Its group
+  // is what the list's selection takes.
+  if let group = w.group, ["AXTextField", "AXImage"].contains(role) {
+    let v = attrs(e, ["AXFilename", kAXFocusedAttribute])
+    if v[0] is String && (v[1] as? Bool) != true {
+      let l = String(n.label.prefix(80))
+      if !l.isEmpty, let it = item(e, n, role: role, label: l, web: w.web, row: group, shown: "Cell") { out.append(it) }
+      return
+    }
+  }
   // An alert can also be the observed window itself (a window of subrole dialog).
   if sheetRoles.contains(role) || (w.depth == 0 && ["AXDialog", "AXSystemDialog"].contains(n.subrole)) {
     next.inSheet = true
@@ -542,12 +562,71 @@ func pressMenu(_ path: [String]) -> String? {
   return AXUIElementPerformAction(node, kAXPressAction as CFString) == .success ? nil : "press failed"
 }
 
-func clickAt(_ p: CGPoint) {
+func clickAt(_ p: CGPoint, count: Int = 1) {
   CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
   usleep(20_000)
-  for t in [CGEventType.leftMouseDown, .leftMouseUp] {
-    CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+  for n in 1...count {
+    for t in [CGEventType.leftMouseDown, .leftMouseUp] {
+      let ev = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)
+      ev?.setIntegerValueField(.mouseEventClickState, value: Int64(n))  // 2 = the second click of a double click
+      ev?.post(tap: .cghidEventTap)
+    }
   }
+}
+
+/// A real click (or double click) at the middle of a frame; the user's cursor is put back afterwards.
+func realClick(_ f: CGRect, count: Int = 1) {
+  // A click that lands while the app is still coming forward gets lost, so give activation time.
+  // focusTarget already waited until the app and window report focus (Safari takes clicks right then,
+  // 5 of 5); the margin is for Electron apps, where this was first seen. Free when already in front.
+  if focusTarget() { usleep(150_000) }
+  let saved = CGEvent(source: nil)?.location
+  clickAt(CGPoint(x: f.midX, y: f.midY), count: count)
+  if let saved { usleep(30_000); CGWarpMouseCursorPosition(saved) }
+}
+
+/// Select a row or file item through the container that holds the selection: AXSelectedRows on a row's table,
+/// else AXSelectedChildren on the nearest of 3 ancestors that lets it be set (the list of a Finder column; in
+/// icon view the list above the item's section). `extend` keeps what is selected. Returns how many are selected
+/// then, or nil when nothing took it or the item doesn't show as selected afterwards (a set that "succeeds"
+/// without effect must not pass for a click). `shown` is the listed element, which may be the one that reports it.
+func select(_ item: AXUIElement, shownBy shown: AXUIElement, extend: Bool) -> Int? {
+  var node = item
+  for level in 0..<3 {
+    guard let p = attr(node, kAXParentAttribute), CFGetTypeID(p) == AXUIElementGetTypeID() else { return nil }
+    node = p as! AXUIElement
+    for name in level == 0 ? [kAXSelectedRowsAttribute, kAXSelectedChildrenAttribute] : [kAXSelectedChildrenAttribute] {
+      var can: DarwinBoolean = false
+      guard AXUIElementIsAttributeSettable(node, name as CFString, &can) == .success, can.boolValue else { continue }
+      var items = extend ? (attr(node, name) as? [AXUIElement]) ?? [] : []
+      if !items.contains(where: { CFEqual($0, item) }) { items.append(item) }
+      guard AXUIElementSetAttributeValue(node, name as CFString, items as CFArray) == .success else { continue }
+      // Finder shows the selection a moment after the set returns. An item that doesn't say whether it is
+      // selected is taken at its word.
+      let says = { [item, shown].compactMap { attr($0, kAXSelectedAttribute) as? Bool } }
+      if says().isEmpty || waitFor(0.3, { says().contains(true) }) { return items.count }
+      return nil
+    }
+  }
+  return nil
+}
+
+/// The element that takes AXOpen: the listed one, or one inside its row or group (in list view the name field
+/// in the row's first cell; in the sidebar the row's cell).
+func opener(_ el: AXUIElement, in row: AXUIElement?) -> AXUIElement? {
+  let opens = { (e: AXUIElement) -> Bool in
+    var names: CFArray?
+    return AXUIElementCopyActionNames(e, &names) == .success && ((names as? [String]) ?? []).contains("AXOpen")
+  }
+  if opens(el) { return el }
+  func search(_ e: AXUIElement, _ depth: Int) -> AXUIElement? {
+    for c in attr(e, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+      if opens(c) { return c }
+      if depth < 3, let hit = search(c, depth + 1) { return hit }
+    }
+    return nil
+  }
+  return row.flatMap { search($0, 1) }
 }
 
 /// Insert text at an element's caret (replacing its selection) through accessibility. True only when the
@@ -599,39 +678,50 @@ func act(_ r: [String: Any]) -> [String: Any] {
   if let t { res["target"] = t.info }
   lazy var f = el.flatMap(frame)
   // The cursor flies there while the action already runs; it never holds the action up.
-  if Overlay.shared.enabled, let f { Overlay.shared.point(at: f, click: action == "press") }
+  if Overlay.shared.enabled, let f { Overlay.shared.point(at: f, click: action == "press" || action == "open") }
 
   switch action {
   case "press":
     guard let t, let el else { return ["error": "unknown ref"] }
-    // A file name or cell in a table: AXPress on it does nothing, so select its row instead.
-    // extend:true adds the row to the current selection (like cmd-click).
-    if ["AXRow", "AXCell", "AXStaticText", "AXTextField", "AXImage"].contains(t.role), let row = t.row,
-       let table = attr(row, kAXParentAttribute).map({ $0 as! AXUIElement }) {
-      var rows = (r["extend"] as? Bool) == true ? (attr(table, kAXSelectedRowsAttribute) as? [AXUIElement]) ?? [] : []
-      if !rows.contains(where: { CFEqual($0, row) }) { rows.append(row) }
-      if AXUIElementSetAttributeValue(table, kAXSelectedRowsAttribute as CFString, rows as CFArray) == .success {
-        res["via"] = "select"; res["selected"] = rows.count
-        break
-      }
+    // A file name or cell in a table or file view: AXPress on it does nothing, so select it instead, like a
+    // single click (in column view that shows a folder's contents). extend:true adds it to the current
+    // selection (like cmd-click).
+    let itemish = ["AXRow", "AXCell", "AXStaticText", "AXTextField", "AXImage"].contains(t.role)
+    if itemish, let row = t.row, let n = select(row, shownBy: el, extend: (r["extend"] as? Bool) == true) {
+      res["via"] = "select"; res["selected"] = n
+      break
     }
-    // Plain text reports success for AXPress but does nothing, so click it for real.
-    let isText = t.role == "AXStaticText"
-    // Web content (Electron apps, browsers) often answers AXPress with "success" and ignores it:
-    // pages listen for mouse events. Click those for real.
-    if t.web, let f, f.width > 0 {
-      // A click that lands while the app is still coming forward gets lost, so give activation time.
-      // focusTarget already waited until the app and window report focus (Safari takes clicks right then,
-      // 5 of 5); the margin is for Electron apps, where this was first seen. Free when already in front.
-      if focusTarget() { usleep(150_000) }
-      let saved = CGEvent(source: nil)?.location
-      clickAt(CGPoint(x: f.midX, y: f.midY))
-      if let saved { usleep(30_000); CGWarpMouseCursorPosition(saved) }
+    // Web content (Electron apps, browsers) often answers AXPress with "success" and ignores it: pages listen
+    // for mouse events. So do plain text and a file's name or icon that could not be selected (Finder's column
+    // view answered AXPress on a name with success and did nothing). Click those for real.
+    let silent = ["AXStaticText", "AXTextField", "AXImage"].contains(t.role) && (t.role == "AXStaticText" || t.row != nil)
+    if t.web || silent, let f, f.width > 0 {
+      realClick(f)
       res["via"] = "click"
-    } else if isText || AXUIElementPerformAction(el, kAXPressAction as CFString) != .success {
+    } else if silent || AXUIElementPerformAction(el, kAXPressAction as CFString) != .success {
       // Some elements (cells, rows, text) have no press action; fall back to a real click at their center.
       guard let f else { return ["error": "press failed"] }
       clickAt(CGPoint(x: f.midX, y: f.midY))
+    }
+  case "open":
+    // What a double click does to a file, folder or sidebar place. Select it first: Finder's AXOpen in list
+    // view opened an item that wasn't selected in only 2 of 4 tries, a selected one every time; and cmd+down
+    // (Finder's Open) needs the selection.
+    guard let t, let el else { return ["error": "unknown ref"] }
+    let selected = t.row.flatMap { select($0, shownBy: el, extend: false) } != nil
+    if let o = opener(el, in: t.row) {
+      // Finder answers AXOpen with an error (-25205) even when it opens the item, so the result says nothing;
+      // the caller sees on the next screen whether it worked.
+      AXUIElementPerformAction(o, "AXOpen" as CFString)
+      res["via"] = "open"
+    } else if selected {
+      focusTarget()
+      postKey(125, flags: .maskCommand)  // cmd+down
+      res["via"] = "key"
+    } else {
+      guard let f, f.width > 0 else { return ["error": "open failed: nothing to open here; use press"] }
+      realClick(f, count: 2)
+      res["via"] = "double-click"
     }
   case "set_value":
     guard let el, let t = r["text"] as? String else { return ["error": ref != nil && el == nil ? "unknown ref" : "bad args"] }

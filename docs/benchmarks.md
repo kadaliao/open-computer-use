@@ -129,7 +129,8 @@ input tokens and $1.35. Costs are API prices.
 
 **Where agent-desktop did better.** In Finder's column view it opened folders by
 clicking them. ocu's `press` on a file name there did nothing, so the model fell back to
-a screenshot and `click_at`. agent-desktop also works without taking focus, which this
+a screenshot and `click_at`. (Since fixed: `press` selects files in every Finder view and
+`open` opens them; see [plan 03](plans/03-open-items.md).) agent-desktop also works without taking focus, which this
 comparison didn't measure.
 
 **Limits.** Nine runs each, four short tasks, one model, one machine. Three of the tasks

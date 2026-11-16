@@ -11,6 +11,10 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ### Added
 
+- `open{ref}` action: a double click on a file, folder or row. It opens the file or goes
+  into the folder, in Finder's four views and in open and save panels.
+- Files in Finder's column, icon and gallery views are listed as `Cell "name"`. Before,
+  column view listed them as text fields and the other two didn't list them.
 - MIT license.
 - Documentation in English and Chinese: a shorter README, and pages for concepts, MCP
   setup, the built-in agent, configuration, troubleshooting, architecture, benchmarks and
@@ -24,6 +28,10 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ### Changed
 
+- `press` on a file in Finder's column, icon and gallery views selects it, as it already
+  did in list view, and `extend` works there too. It used to report success and do
+  nothing.
+- `press` on a row or file that can't be selected falls back to a real click.
 - Release archives also contain `README.zh-CN.md` and `LICENSE`.
 
 ## [0.6.0] - 2026-11-10

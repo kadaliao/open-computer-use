@@ -1,6 +1,6 @@
 # 03. Opening items in Finder and other file views
 
-- **Status:** planned
+- **Status:** done (0.7.0)
 - **Priority:** P0. The comparison showed it.
 - **Depends on:** 01 (to measure), but can start without it
 - **Size:** one session
@@ -83,3 +83,56 @@ Drag and drop, and renaming files.
 - In the vs-benchmark Finder task, ocu needs no screenshot.
 - The Finder line is removed from known limits in both troubleshooting files, and the
   `open` action is documented in both languages, with a changelog entry.
+
+## Outcome
+
+Shipped (2026-11-16, macOS 26, Finder in English):
+
+- **What the views look like** (step 1). The same in Finder and in open and save panels:
+
+  | View | A file is | Selection lives on | `AXOpen` on |
+  | --- | --- | --- | --- |
+  | list | `AXOutline > AXRow > AXCell > AXTextField` | `AXSelectedRows` of the outline | the text field |
+  | column | `AXBrowser > … > AXList > AXGroup > AXTextField` | `AXSelectedChildren` of the list, set to the group | the text field |
+  | icon, gallery | `AXList > AXList > AXGroup > AXImage` | `AXSelectedChildren` of the outer list, set to the group | the image |
+
+  The file's element is the one with an `AXFilename` attribute. Icon and gallery view
+  expose only the files that are visible. `AXOpen` always answers with error -25205, also
+  when it opens the item, and in list view it opened an item that wasn't selected in only
+  2 of 4 tries (a selected one every time), so `open` selects first and ignores the result.
+- **`press`** selects through the container (`select()` in `main.swift`), checks that the
+  item then reports `AXSelected`, and reports `"via":"select"`; `extend` works in every
+  view. When nothing takes the selection, a row, file or text gets a real click instead
+  of a silent `AXPress`.
+- **`open{ref}`**: select, then `AXOpen` on the item or on an element inside its row
+  (`"via":"open"`); with no `AXOpen`, cmd+down on the selection (`"via":"key"`); else a
+  double click (`"via":"double-click"`). It is in the MCP `act` enum and instructions,
+  the planner prompt and `docs/concepts`. Still three core tools.
+- **Listing.** Files in column, icon and gallery view are listed as `Cell "name"` (a name
+  being edited stays a `TextField`). List view keeps its `Row` lines.
+
+Numbers, built-in agent with DeepSeek, one run each, the five tasks `finder-open-icon`,
+`finder-open-list`, `finder-open-column`, `panel-open-folder` and `finder-utilities`:
+
+| | Pass | Avg task | Avg planner calls |
+| --- | --- | --- | --- |
+| before (f14942c) | 3/5 | 12.0 s | 10.4 |
+| after | 5/5 | 3.6 s | 2.8 |
+
+Before, the icon and column tasks failed (nothing listed to press; `press` without
+effect), and list view passed only after the model found cmd+down by itself. No task used
+a screenshot after the change.
+
+Left out or changed:
+
+- The new bench tasks open a folder made for the run instead of Applications > Utilities,
+  so that the Go menu can't stand in for the file list. The view is set with AppleScript
+  in setup, not with cmd+1/2/3.
+- The agent-desktop comparison (plan 01) has not been run again, so "no screenshot in the
+  vs-benchmark Finder task" is shown only by `finder-utilities` here (2 planner calls, no
+  screenshot).
+- The cmd+down and double-click fallbacks of `open` have no app that exercises them yet;
+  only the `AXOpen` path was seen running.
+- A file that is scrolled out of sight in icon or gallery view is not listed, and those
+  lists give no "showing N of M" line. `find_text` doesn't reach it either.
+- No debug flag in the helper: the hierarchy was dumped with a throwaway script.
