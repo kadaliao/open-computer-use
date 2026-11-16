@@ -9,6 +9,11 @@ screen format or tool behavior; such changes are listed under **Changed**.
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-16
+
+Reliability fixes found while re-running the benchmarks: a helper crash, and three ways
+the built-in agent went wrong (stopping early, pressing the wrong element, looping).
+
 ### Fixed
 
 - The helper no longer crashes when an element reports a frame with NaN or infinite
@@ -210,7 +215,8 @@ planner calls each, against 20/22 at 9.8 s and 4 calls for 0.5.0. See
 First release: an accessibility-first computer-use agent for macOS, with a Swift helper,
 a TypeScript core, a CLI and an MCP server.
 
-[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/kadaliao/open-computer-use/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0

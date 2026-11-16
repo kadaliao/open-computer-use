@@ -6,6 +6,10 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 ## [未发布]
 
+## [0.7.2] - 2026-11-16
+
+重跑基准测试时发现的可靠性修复：helper 的一个崩溃，以及内置 agent 的三种出错方式（提前结束、按错元素、原地打转）。
+
 ### 修复
 
 - 元素报出的坐标是 NaN 或无穷大时，helper 不再崩溃（在系统设置切换页面时遇到过）。
@@ -159,7 +163,8 @@ open-computer-use 的重要改动都记在这里。格式参照 [Keep a Changelo
 
 第一个版本：以辅助功能为主的 macOS computer-use agent，包含 Swift helper、TypeScript core、命令行和 MCP 服务。
 
-[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...HEAD
+[未发布]: https://github.com/kadaliao/open-computer-use/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/kadaliao/open-computer-use/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/kadaliao/open-computer-use/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/kadaliao/open-computer-use/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/open-computer-use/compare/v0.5.0...v0.6.0

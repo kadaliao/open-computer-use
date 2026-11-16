@@ -1,6 +1,6 @@
 {
   "name": "open-computer-use",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "type": "module",
   "bin": { "ocu": "src/cli.ts" },
   "scripts": { "mcp": "bun src/mcp.ts", "typecheck": "tsc --noEmit" },
